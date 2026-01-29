@@ -33,7 +33,9 @@ import {
   X, 
   Truck, 
   Calendar, 
-  Trash2 
+  Trash2,
+  Pencil, // Nuova icona per modifica
+  Tag // Nuova icona per sottocategoria
 } from 'lucide-react';
 
 // --- Mappa Icone ---
@@ -52,12 +54,13 @@ const ICON_MAP = {
   'x': X,
   'truck': Truck,
   'calendar': Calendar,
-  'trash-2': Trash2
+  'trash-2': Trash2,
+  'pencil': Pencil,
+  'tag': Tag
 };
 
 // --- Componente Iconale Reattivo ---
 const Icon = ({ name, size = 20, className = "", strokeWidth = 2.5 }) => {
-  // Prende l'icona dalla mappa, se non esiste usa Package come default
   const LucideIcon = ICON_MAP[name] || Package;
   return <LucideIcon size={size} className={className} strokeWidth={strokeWidth} />;
 };
@@ -124,7 +127,10 @@ export default function App() {
   const [activeCategory, setActiveCategory] = useState('TUTTI');
   const [filterMode, setFilterMode] = useState('ALL'); 
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Gestione Modale e Modifica
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [itemToEdit, setItemToEdit] = useState(null); // Se popolato, siamo in "Edit Mode"
   const [selectedItem, setSelectedItem] = useState(null);
 
   const userRole = useMemo(() => {
@@ -173,27 +179,47 @@ export default function App() {
 
   const handleLogout = () => signOut(auth);
 
-  const addItemOrMerge = async (newItem) => {
-    // Smart Merge Check
-    const existing = items.find(i => 
-      (i.name || "").toLowerCase().trim() === (newItem.name || "").toLowerCase().trim() && 
-      (i.category || "") === (newItem.category || "")
-    );
-
+  // Funzione unificata: Crea Nuovo o Aggiorna Esistente
+  const handleSaveItem = async (formData, docId = null) => {
     try {
-      if (existing) {
-        const itemRef = doc(db, 'inventory', existing.id);
+      if (docId) {
+        // MODALITÀ MODIFICA: Aggiorna il documento esistente
+        const itemRef = doc(db, 'inventory', docId);
         await updateDoc(itemRef, {
-          quantity: (existing.quantity || 0) + newItem.quantity,
-          minThreshold: newItem.minThreshold || existing.minThreshold,
-          supplier: newItem.supplier || existing.supplier || ""
+          name: formData.name,
+          category: formData.category,
+          quantity: formData.quantity, // Qui sovrascrive, non somma (voluto in edit)
+          minThreshold: formData.minThreshold,
+          supplier: formData.supplier || "",
+          subcategory: formData.subcategory || "", // Nuovo campo
+          unit: formData.unit,
+          expiryDate: formData.expiryDate
         });
       } else {
-        await addDoc(collection(db, 'inventory'), newItem);
+        // MODALITÀ CREAZIONE: Logica "Smart Merge"
+        const existing = items.find(i => 
+          (i.name || "").toLowerCase().trim() === (formData.name || "").toLowerCase().trim() && 
+          (i.category || "") === (formData.category || "")
+        );
+
+        if (existing) {
+          // Se esiste già, somma la quantità
+          const itemRef = doc(db, 'inventory', existing.id);
+          await updateDoc(itemRef, {
+            quantity: (existing.quantity || 0) + formData.quantity,
+            minThreshold: formData.minThreshold || existing.minThreshold,
+            supplier: formData.supplier || existing.supplier || "",
+            subcategory: formData.subcategory || existing.subcategory || ""
+          });
+        } else {
+          // Se non esiste, crea nuovo
+          await addDoc(collection(db, 'inventory'), formData);
+        }
       }
       setIsAddModalOpen(false);
+      setItemToEdit(null); // Resetta stato edit
     } catch (err) {
-      alert("Errore durante il salvataggio.");
+      alert("Errore durante il salvataggio: " + err.message);
     }
   };
 
@@ -217,6 +243,7 @@ export default function App() {
     } catch (e) { return false; }
   };
 
+  // Logica di Filtro Aggiornata: Cerca in Nome, Fornitore e Sottocategoria
   const filteredItems = useMemo(() => {
     let list = items || [];
     if (isCook) list = list.filter(i => (i.category || "") === CATEGORIES.RISTORANTE);
@@ -227,13 +254,29 @@ export default function App() {
 
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
-      list = list.filter(i => (i.name || "").toLowerCase().includes(q));
+      list = list.filter(i => 
+        (i.name || "").toLowerCase().includes(q) || 
+        (i.supplier || "").toLowerCase().includes(q) ||
+        (i.subcategory || "").toLowerCase().includes(q) // Cerca anche nella sottocategoria
+      );
     }
     return list.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   }, [items, activeCategory, filterMode, searchQuery, isCook]);
 
   const lowStockCount = useMemo(() => items.filter(i => (i.quantity || 0) <= (i.minThreshold || 0)).length, [items]);
   const expiringCount = useMemo(() => items.filter(i => checkExpiring(i.expiryDate)).length, [items]);
+
+  // Gestori per aprire le modali
+  const openNewItemModal = () => {
+    setItemToEdit(null); // Assicura che sia vuoto
+    setIsAddModalOpen(true);
+  };
+
+  const openEditModal = (item) => {
+    setSelectedItem(null); // Chiude il dettaglio
+    setItemToEdit(item);   // Carica i dati
+    setIsAddModalOpen(true); // Apre il form
+  };
 
   if (loading) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white font-black italic">CARICAMENTO...</div>;
 
@@ -258,7 +301,6 @@ export default function App() {
           <button type="submit" className="w-full bg-slate-900 text-white p-5 rounded-2xl font-black text-xl hover:bg-black uppercase border-b-8 border-slate-950 shadow-xl active:scale-95 transition-all">Accedi</button>
         </form>
       </div>
-      <button onClick={() => { if(confirm("Resettare l'app?")) window.location.reload(); }} className="mt-8 text-[10px] font-black uppercase text-slate-500 hover:text-red-500 bg-white/5 px-4 py-2 rounded-full">⚠️ Reset Dati App</button>
     </div>
   );
 
@@ -295,7 +337,7 @@ export default function App() {
           <Autocomplete 
             value={searchQuery} onChange={setSearchQuery} 
             suggestions={[...new Set(items.map(i => i.name || ""))]} 
-            placeholder="Cerca articoli..." className="w-full bg-white border-4 border-slate-200 rounded-[2rem] p-6 pl-14 text-xl font-black focus:border-slate-900 outline-none shadow-hard" 
+            placeholder="Cerca per nome, fornitore, tipo..." className="w-full bg-white border-4 border-slate-200 rounded-[2rem] p-6 pl-14 text-xl font-black focus:border-slate-900 outline-none shadow-hard" 
           />
         </div>
 
@@ -317,12 +359,31 @@ export default function App() {
         </div>
       </main>
 
-      <button onClick={() => setIsAddModalOpen(true)} className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-8 py-4 rounded-full shadow-[0_4px_14px_0_rgba(0,118,255,0.39)] flex items-center justify-center gap-3 active:scale-95 hover:bg-blue-700 hover:-translate-y-1 transition-all z-[200] font-black uppercase tracking-widest text-sm w-11/12 max-w-sm">
+      <button onClick={openNewItemModal} className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-8 py-4 rounded-full shadow-[0_4px_14px_0_rgba(0,118,255,0.39)] flex items-center justify-center gap-3 active:scale-95 hover:bg-blue-700 hover:-translate-y-1 transition-all z-[200] font-black uppercase tracking-widest text-sm w-11/12 max-w-sm">
         <Icon name="plus" size={24} strokeWidth={3} /> Aggiungi Prodotto
       </button>
 
-      {isAddModalOpen && <AddModal onClose={() => setIsAddModalOpen(false)} onAdd={addItemOrMerge} isCook={isCook} nameSuggestions={[...new Set(items.map(i => i.name || ""))]} supplierSuggestions={[...new Set(items.filter(i => i.supplier).map(i => i.supplier || ""))]} />}
-      {selectedItem && <DetailModal item={selectedItem} onClose={() => setSelectedItem(null)} isAdmin={isAdmin} onDelete={async (id) => { if(confirm("Eliminare?")) { await deleteDoc(doc(db, 'inventory', id)); setSelectedItem(null); } }} />}
+      {isAddModalOpen && (
+        <AddModal 
+          onClose={() => setIsAddModalOpen(false)} 
+          onSave={handleSaveItem} 
+          isCook={isCook} 
+          initialData={itemToEdit}
+          nameSuggestions={[...new Set(items.map(i => i.name || ""))]} 
+          supplierSuggestions={[...new Set(items.filter(i => i.supplier).map(i => i.supplier || ""))]} 
+          subcategorySuggestions={[...new Set(items.filter(i => i.subcategory).map(i => i.subcategory || ""))]} // Suggerimenti sottocategoria
+        />
+      )}
+      
+      {selectedItem && (
+        <DetailModal 
+          item={selectedItem} 
+          onClose={() => setSelectedItem(null)} 
+          isAdmin={isAdmin} 
+          onEdit={() => openEditModal(selectedItem)} // Passa la funzione Edit
+          onDelete={async (id) => { if(confirm("Eliminare?")) { await deleteDoc(doc(db, 'inventory', id)); setSelectedItem(null); } }} 
+        />
+      )}
     </div>
   );
 }
@@ -342,7 +403,10 @@ function ItemCard({ item, onUpdate, onDetails, isExpiringSoon }) {
           </div>
         </div>
         <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none mb-1 text-slate-900 line-clamp-2">{item?.name || "Articolo"}</h3>
-        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-6">{item?.category || "Altro"}</p>
+        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-6 flex gap-2">
+            <span>{item?.category || "Altro"}</span>
+            {item?.subcategory && <span className="text-slate-500">/ {item.subcategory}</span>}
+        </p>
         <div className="flex items-baseline gap-2">
           <span className={`text-6xl font-black tracking-tighter tabular-nums ${isLow ? 'text-red-700' : 'text-slate-900'}`}>{item?.quantity || 0}</span>
           <span className="text-xl font-black text-slate-400 uppercase tracking-tighter">{item?.unit || ""}</span>
@@ -356,22 +420,26 @@ function ItemCard({ item, onUpdate, onDetails, isExpiringSoon }) {
   );
 }
 
-function AddModal({ onClose, onAdd, isCook, nameSuggestions, supplierSuggestions }) {
-  const [name, setName] = useState('');
-  const [supplier, setSupplier] = useState('');
+function AddModal({ onClose, onSave, isCook, initialData, nameSuggestions, supplierSuggestions, subcategorySuggestions }) {
+  // Stati locali del form, inizializzati con initialData se presente (Edit Mode)
+  const [name, setName] = useState(initialData?.name || '');
+  const [supplier, setSupplier] = useState(initialData?.supplier || '');
+  const [subcategory, setSubcategory] = useState(initialData?.subcategory || ''); // Nuovo stato
 
   const handleSubmit = (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
-    onAdd({
+    const formData = {
       name: name.trim(),
       category: isCook ? CATEGORIES.RISTORANTE : fd.get('category'),
       quantity: parseFloat(fd.get('quantity')) || 0,
       minThreshold: parseFloat(fd.get('minThreshold')) || 0,
       supplier: supplier.trim(),
+      subcategory: subcategory.trim(), // Salviamo la sottocategoria
       unit: fd.get('unit') || '',
       expiryDate: fd.get('expiry') || ''
-    });
+    };
+    onSave(formData, initialData?.id); // Passiamo l'ID se stiamo modificando
   };
 
   return (
@@ -379,34 +447,46 @@ function AddModal({ onClose, onAdd, isCook, nameSuggestions, supplierSuggestions
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}></div>
       <div className="relative bg-white w-full max-w-lg rounded-[2.5rem] overflow-hidden shadow-2xl animate-modal flex flex-col max-h-[90vh]">
         <div className="p-8 border-b flex justify-between items-center">
-          <h2 className="text-3xl font-black uppercase italic tracking-tighter text-slate-900">Nuovo Carico</h2>
+          <h2 className="text-3xl font-black uppercase italic tracking-tighter text-slate-900">
+             {initialData ? "Modifica" : "Nuovo Carico"}
+          </h2>
           <button onClick={onClose} className="text-slate-400 hover:text-red-500 transition-colors"><Icon name="x" size={32} /></button>
         </div>
         <form onSubmit={handleSubmit} className="p-8 space-y-6 overflow-y-auto no-scrollbar">
           <Autocomplete label="Articolo" value={name} onChange={setName} suggestions={nameSuggestions} placeholder="Cerca o inserisci..." className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none focus:border-slate-900 transition-all" />
+          
           <div className="grid grid-cols-2 gap-4">
-            <select name="category" disabled={isCook} className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none disabled:bg-slate-50" defaultValue={CATEGORIES.RISTORANTE}>
+            <select name="category" disabled={isCook} className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none disabled:bg-slate-50" defaultValue={initialData?.category || CATEGORIES.RISTORANTE}>
               {Object.values(CATEGORIES).map(c => <option key={c} value={c}>{c}</option>)}
             </select>
-            <select name="unit" className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none">
+            <select name="unit" className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none" defaultValue={initialData?.unit || ""}>
               <option value="">U.M.</option>
               {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
             </select>
           </div>
+
           <div className="grid grid-cols-2 gap-4">
-            <input name="quantity" type="number" step="0.1" required defaultValue="1" className="w-full border-4 border-slate-100 rounded-2xl p-4 text-3xl font-black focus:border-slate-900 outline-none transition-all" placeholder="Q.tà" />
-            <input name="minThreshold" type="number" step="0.1" required defaultValue="5" className="w-full border-4 border-slate-100 rounded-2xl p-4 text-3xl font-black focus:border-slate-900 outline-none transition-all" placeholder="Soglia" />
+            <input name="quantity" type="number" step="0.1" required defaultValue={initialData?.quantity || "1"} className="w-full border-4 border-slate-100 rounded-2xl p-4 text-3xl font-black focus:border-slate-900 outline-none transition-all" placeholder="Q.tà" />
+            <input name="minThreshold" type="number" step="0.1" required defaultValue={initialData?.minThreshold || "5"} className="w-full border-4 border-slate-100 rounded-2xl p-4 text-3xl font-black focus:border-slate-900 outline-none transition-all" placeholder="Soglia" />
           </div>
+
+          {/* Nuovo campo Sottocategoria */}
+          <Autocomplete label="Sottocategoria / Cantina / Tipo" value={subcategory} onChange={setSubcategory} suggestions={subcategorySuggestions} placeholder="Es. Cantina Antinori" required={false} className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none focus:border-slate-900 transition-all" />
+
           <Autocomplete label="Fornitore" value={supplier} onChange={setSupplier} suggestions={supplierSuggestions} placeholder="Fornitore..." required={false} className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none focus:border-slate-900 transition-all" />
-          <input name="expiry" type="date" className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none" />
-          <button type="submit" className="w-full bg-slate-900 text-white p-6 rounded-2xl font-black text-xl hover:bg-black uppercase border-b-8 border-slate-950 shadow-xl active:scale-95 transition-all">Salva</button>
+          
+          <input name="expiry" type="date" defaultValue={initialData?.expiryDate || ""} className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none" />
+          
+          <button type="submit" className="w-full bg-slate-900 text-white p-6 rounded-2xl font-black text-xl hover:bg-black uppercase border-b-8 border-slate-950 shadow-xl active:scale-95 transition-all">
+             {initialData ? "Salva Modifiche" : "Aggiungi al Magazzino"}
+          </button>
         </form>
       </div>
     </div>
   );
 }
 
-function DetailModal({ item, onClose, onDelete, isAdmin }) {
+function DetailModal({ item, onClose, onDelete, onEdit, isAdmin }) {
   const isLow = (item?.quantity || 0) <= (item?.minThreshold || 0);
   const meta = CATEGORIES_META[item?.category] || CATEGORIES_META[CATEGORIES.ALTRO];
 
@@ -415,8 +495,18 @@ function DetailModal({ item, onClose, onDelete, isAdmin }) {
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onClick={onClose}></div>
       <div className="relative bg-white w-11/12 max-w-md rounded-[2.5rem] overflow-hidden shadow-2xl animate-modal flex flex-col">
         <div className="p-8 pb-2">
-          <div className={`px-4 py-2 rounded-xl inline-flex ${meta.color} text-white text-[10px] font-black uppercase mb-4 shadow-md`}><Icon name={meta.icon} size={14} className="mr-2" /> {item?.category}</div>
+          <div className="flex justify-between items-start">
+             <div className={`px-4 py-2 rounded-xl inline-flex ${meta.color} text-white text-[10px] font-black uppercase mb-4 shadow-md`}><Icon name={meta.icon} size={14} className="mr-2" /> {item?.category}</div>
+             {isAdmin && (
+               <button onClick={onEdit} className="bg-blue-50 text-blue-600 p-3 rounded-xl border border-blue-100 hover:bg-blue-100 transition-all flex items-center gap-2 font-black text-[10px] uppercase">
+                 <Icon name="pencil" size={16} /> Modifica
+               </button>
+             )}
+          </div>
+          
           <h2 className="text-3xl font-black uppercase italic tracking-tighter leading-none text-slate-900">{item?.name}</h2>
+          {item?.subcategory && <p className="text-lg font-bold text-slate-500 mt-1 flex items-center gap-1"><Icon name="tag" size={14} /> {item.subcategory}</p>}
+
           <div className={`mt-6 p-6 rounded-[2rem] border-4 flex flex-col items-center justify-center ${isLow ? 'bg-red-50 border-red-600' : 'bg-slate-50 border-slate-200'}`}>
             <p className={`text-[10px] font-black uppercase mb-1 ${isLow ? 'text-red-700' : 'text-slate-400'}`}>Giacenza Attuale</p>
             <div className="flex items-baseline gap-2">
@@ -438,6 +528,9 @@ function DetailModal({ item, onClose, onDelete, isAdmin }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
     </div>
   );
 }
