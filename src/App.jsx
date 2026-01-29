@@ -34,8 +34,8 @@ import {
   Truck, 
   Calendar, 
   Trash2,
-  Pencil, // Nuova icona per modifica
-  Tag // Nuova icona per sottocategoria
+  Pencil,
+  Tag
 } from 'lucide-react';
 
 // --- Mappa Icone ---
@@ -128,27 +128,30 @@ export default function App() {
   const [filterMode, setFilterMode] = useState('ALL'); 
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Gestione Modale e Modifica
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [itemToEdit, setItemToEdit] = useState(null); // Se popolato, siamo in "Edit Mode"
+  const [itemToEdit, setItemToEdit] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
 
+  // --- GESTIONE RUOLI AGGIORNATA ---
   const userRole = useMemo(() => {
     if (!user) return null;
     if (user.email === 'admin@lucciole.app') return 'admin';
     if (user.email === 'cuoco@lucciole.app') return 'cuoco';
+    if (user.email === 'barista@lucciole.app') return 'barista'; // NUOVO RUOLO
     return null;
   }, [user]);
 
   const isCook = userRole === 'cuoco';
+  const isBarista = userRole === 'barista'; // NUOVO BOOLEANO
   const isAdmin = userRole === 'admin';
 
-  // Auth & Sync
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
+      // Imposta categoria automatica al login
       if (u?.email === 'cuoco@lucciole.app') setActiveCategory(CATEGORIES.RISTORANTE);
+      if (u?.email === 'barista@lucciole.app') setActiveCategory(CATEGORIES.BAR);
     });
 
     const unsubDb = onSnapshot(collection(db, 'inventory'), (snapshot) => {
@@ -166,8 +169,10 @@ export default function App() {
     const p = e.target.password.value;
     
     let email = '';
+    // --- MAPPA UTENTI AGGIORNATA ---
     if (u === 'admin') email = 'admin@lucciole.app';
     else if (u === 'cuoco') email = 'cuoco@lucciole.app';
+    else if (u === 'barista') email = 'barista@lucciole.app'; // NUOVO LOGIN
     else { setLoginError('Utente non riconosciuto.'); return; }
 
     try {
@@ -179,31 +184,27 @@ export default function App() {
 
   const handleLogout = () => signOut(auth);
 
-  // Funzione unificata: Crea Nuovo o Aggiorna Esistente
   const handleSaveItem = async (formData, docId = null) => {
     try {
       if (docId) {
-        // MODALITÀ MODIFICA: Aggiorna il documento esistente
         const itemRef = doc(db, 'inventory', docId);
         await updateDoc(itemRef, {
           name: formData.name,
           category: formData.category,
-          quantity: formData.quantity, // Qui sovrascrive, non somma (voluto in edit)
+          quantity: formData.quantity,
           minThreshold: formData.minThreshold,
           supplier: formData.supplier || "",
-          subcategory: formData.subcategory || "", // Nuovo campo
+          subcategory: formData.subcategory || "",
           unit: formData.unit,
           expiryDate: formData.expiryDate
         });
       } else {
-        // MODALITÀ CREAZIONE: Logica "Smart Merge"
         const existing = items.find(i => 
           (i.name || "").toLowerCase().trim() === (formData.name || "").toLowerCase().trim() && 
           (i.category || "") === (formData.category || "")
         );
 
         if (existing) {
-          // Se esiste già, somma la quantità
           const itemRef = doc(db, 'inventory', existing.id);
           await updateDoc(itemRef, {
             quantity: (existing.quantity || 0) + formData.quantity,
@@ -212,12 +213,11 @@ export default function App() {
             subcategory: formData.subcategory || existing.subcategory || ""
           });
         } else {
-          // Se non esiste, crea nuovo
           await addDoc(collection(db, 'inventory'), formData);
         }
       }
       setIsAddModalOpen(false);
-      setItemToEdit(null); // Resetta stato edit
+      setItemToEdit(null);
     } catch (err) {
       alert("Errore durante il salvataggio: " + err.message);
     }
@@ -243,10 +243,13 @@ export default function App() {
     } catch (e) { return false; }
   };
 
-  // Logica di Filtro Aggiornata: Cerca in Nome, Fornitore e Sottocategoria
+  // --- FILTRO AGGIORNATO ---
   const filteredItems = useMemo(() => {
     let list = items || [];
+    
+    // Logica permessi: Cuoco vede Risto, Barista vede Bar, Admin vede quello che seleziona
     if (isCook) list = list.filter(i => (i.category || "") === CATEGORIES.RISTORANTE);
+    else if (isBarista) list = list.filter(i => (i.category || "") === CATEGORIES.BAR);
     else if (activeCategory !== 'TUTTI') list = list.filter(i => (i.category || "") === activeCategory);
 
     if (filterMode === 'LOW_STOCK') list = list.filter(i => (i.quantity || 0) <= (i.minThreshold || 0));
@@ -257,25 +260,24 @@ export default function App() {
       list = list.filter(i => 
         (i.name || "").toLowerCase().includes(q) || 
         (i.supplier || "").toLowerCase().includes(q) ||
-        (i.subcategory || "").toLowerCase().includes(q) // Cerca anche nella sottocategoria
+        (i.subcategory || "").toLowerCase().includes(q)
       );
     }
     return list.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-  }, [items, activeCategory, filterMode, searchQuery, isCook]);
+  }, [items, activeCategory, filterMode, searchQuery, isCook, isBarista]);
 
   const lowStockCount = useMemo(() => items.filter(i => (i.quantity || 0) <= (i.minThreshold || 0)).length, [items]);
   const expiringCount = useMemo(() => items.filter(i => checkExpiring(i.expiryDate)).length, [items]);
 
-  // Gestori per aprire le modali
   const openNewItemModal = () => {
-    setItemToEdit(null); // Assicura che sia vuoto
+    setItemToEdit(null);
     setIsAddModalOpen(true);
   };
 
   const openEditModal = (item) => {
-    setSelectedItem(null); // Chiude il dettaglio
-    setItemToEdit(item);   // Carica i dati
-    setIsAddModalOpen(true); // Apre il form
+    setSelectedItem(null);
+    setItemToEdit(item);
+    setIsAddModalOpen(true);
   };
 
   if (loading) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white font-black italic">CARICAMENTO...</div>;
@@ -306,7 +308,8 @@ export default function App() {
 
   return (
     <div className="min-h-screen pb-44">
-      {!isCook && (
+      {/* Nascondi filtri rapidi se sei dipendente limitato */}
+      {!isCook && !isBarista && (
         <div className="sticky top-0 z-[150] space-y-0.5">
           {lowStockCount > 0 && (
             <button onClick={() => setFilterMode(prev => prev === 'LOW_STOCK' ? 'ALL' : 'LOW_STOCK')} className={`w-full p-4 flex items-center justify-center gap-3 font-black text-[10px] uppercase tracking-widest transition-all ${filterMode === 'LOW_STOCK' ? 'bg-black text-white' : 'bg-red-700 text-white shadow-xl'}`}>
@@ -341,7 +344,8 @@ export default function App() {
           />
         </div>
 
-        {!isCook && (
+        {/* Nascondi selettore categorie per Cuoco e Barista */}
+        {!isCook && !isBarista && (
           <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2">
             <button onClick={() => {setActiveCategory('TUTTI'); setFilterMode('ALL');}} className={`flex-shrink-0 px-6 py-4 rounded-[1.5rem] font-black text-[11px] uppercase transition-all ${activeCategory === 'TUTTI' && filterMode === 'ALL' ? 'bg-slate-900 text-white shadow-lg scale-105' : 'bg-white text-slate-400 border-2 border-slate-100'}`}>TUTTI</button>
             {Object.values(CATEGORIES).map(cat => (
@@ -368,10 +372,11 @@ export default function App() {
           onClose={() => setIsAddModalOpen(false)} 
           onSave={handleSaveItem} 
           isCook={isCook} 
+          isBarista={isBarista} // Passiamo lo stato Barista
           initialData={itemToEdit}
           nameSuggestions={[...new Set(items.map(i => i.name || ""))]} 
           supplierSuggestions={[...new Set(items.filter(i => i.supplier).map(i => i.supplier || ""))]} 
-          subcategorySuggestions={[...new Set(items.filter(i => i.subcategory).map(i => i.subcategory || ""))]} // Suggerimenti sottocategoria
+          subcategorySuggestions={[...new Set(items.filter(i => i.subcategory).map(i => i.subcategory || ""))]} 
         />
       )}
       
@@ -380,7 +385,7 @@ export default function App() {
           item={selectedItem} 
           onClose={() => setSelectedItem(null)} 
           isAdmin={isAdmin} 
-          onEdit={() => openEditModal(selectedItem)} // Passa la funzione Edit
+          onEdit={() => openEditModal(selectedItem)}
           onDelete={async (id) => { if(confirm("Eliminare?")) { await deleteDoc(doc(db, 'inventory', id)); setSelectedItem(null); } }} 
         />
       )}
@@ -420,26 +425,31 @@ function ItemCard({ item, onUpdate, onDetails, isExpiringSoon }) {
   );
 }
 
-function AddModal({ onClose, onSave, isCook, initialData, nameSuggestions, supplierSuggestions, subcategorySuggestions }) {
-  // Stati locali del form, inizializzati con initialData se presente (Edit Mode)
+function AddModal({ onClose, onSave, isCook, isBarista, initialData, nameSuggestions, supplierSuggestions, subcategorySuggestions }) {
   const [name, setName] = useState(initialData?.name || '');
   const [supplier, setSupplier] = useState(initialData?.supplier || '');
-  const [subcategory, setSubcategory] = useState(initialData?.subcategory || ''); // Nuovo stato
+  const [subcategory, setSubcategory] = useState(initialData?.subcategory || '');
 
   const handleSubmit = (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
+    
+    // Logica Categoria Forzata: Cuoco -> Ristorante, Barista -> Bar, Altri -> Scelta
+    let selectedCategory = fd.get('category');
+    if (isCook) selectedCategory = CATEGORIES.RISTORANTE;
+    if (isBarista) selectedCategory = CATEGORIES.BAR;
+
     const formData = {
       name: name.trim(),
-      category: isCook ? CATEGORIES.RISTORANTE : fd.get('category'),
+      category: selectedCategory,
       quantity: parseFloat(fd.get('quantity')) || 0,
       minThreshold: parseFloat(fd.get('minThreshold')) || 0,
       supplier: supplier.trim(),
-      subcategory: subcategory.trim(), // Salviamo la sottocategoria
+      subcategory: subcategory.trim(),
       unit: fd.get('unit') || '',
       expiryDate: fd.get('expiry') || ''
     };
-    onSave(formData, initialData?.id); // Passiamo l'ID se stiamo modificando
+    onSave(formData, initialData?.id);
   };
 
   return (
@@ -456,7 +466,15 @@ function AddModal({ onClose, onSave, isCook, initialData, nameSuggestions, suppl
           <Autocomplete label="Articolo" value={name} onChange={setName} suggestions={nameSuggestions} placeholder="Cerca o inserisci..." className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none focus:border-slate-900 transition-all" />
           
           <div className="grid grid-cols-2 gap-4">
-            <select name="category" disabled={isCook} className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none disabled:bg-slate-50" defaultValue={initialData?.category || CATEGORIES.RISTORANTE}>
+            <select 
+              name="category" 
+              disabled={isCook || isBarista} 
+              className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none disabled:bg-slate-50" 
+              defaultValue={
+                initialData?.category || 
+                (isCook ? CATEGORIES.RISTORANTE : isBarista ? CATEGORIES.BAR : CATEGORIES.RISTORANTE)
+              }
+            >
               {Object.values(CATEGORIES).map(c => <option key={c} value={c}>{c}</option>)}
             </select>
             <select name="unit" className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none" defaultValue={initialData?.unit || ""}>
@@ -470,7 +488,6 @@ function AddModal({ onClose, onSave, isCook, initialData, nameSuggestions, suppl
             <input name="minThreshold" type="number" step="0.1" required defaultValue={initialData?.minThreshold || "5"} className="w-full border-4 border-slate-100 rounded-2xl p-4 text-3xl font-black focus:border-slate-900 outline-none transition-all" placeholder="Soglia" />
           </div>
 
-          {/* Nuovo campo Sottocategoria */}
           <Autocomplete label="Sottocategoria / Cantina / Tipo" value={subcategory} onChange={setSubcategory} suggestions={subcategorySuggestions} placeholder="Es. Cantina Antinori" required={false} className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none focus:border-slate-900 transition-all" />
 
           <Autocomplete label="Fornitore" value={supplier} onChange={setSupplier} suggestions={supplierSuggestions} placeholder="Fornitore..." required={false} className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none focus:border-slate-900 transition-all" />
