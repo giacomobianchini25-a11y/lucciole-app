@@ -531,6 +531,3 @@ function DetailModal({ item, onClose, onDelete, onEdit, isAdmin }) {
     </div>
   );
 }
-    </div>
-  );
-}
