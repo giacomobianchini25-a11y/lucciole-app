@@ -141,8 +141,8 @@ const logTransaction = async (itemName, category, quantityChange, userRole, note
       itemName,
       category,
       quantityChange,
-      revenue, // Incasso generato
-      cost,    // Costo stimato o reale
+      revenue, 
+      cost,
       userRole,
       note,
       date: new Date().toISOString()
@@ -160,7 +160,7 @@ export default function App() {
   const [loginError, setLoginError] = useState('');
   
   // STATI DI NAVIGAZIONE
-  const [activeSection, setActiveSection] = useState(SECTIONS.MENU); // Default: Menù
+  const [activeSection, setActiveSection] = useState(SECTIONS.WAREHOUSE); 
   const [activeCategory, setActiveCategory] = useState('TUTTI');
   const [filterMode, setFilterMode] = useState('ALL'); 
   const [searchQuery, setSearchQuery] = useState('');
@@ -194,10 +194,14 @@ export default function App() {
       setLoading(false);
       // Imposta la vista di default in base al ruolo
       if (u) {
-          if (u.email === 'cuoco@lucciole.app' || u.email === 'barista@lucciole.app') {
-              setActiveSection(SECTIONS.MENU); // Staff parte dal Menù
+          if (u.email === 'cuoco@lucciole.app') {
+              setActiveSection(SECTIONS.WAREHOUSE); 
+              setActiveCategory(WAREHOUSE_CATEGORIES.CUCINA);
+          } else if (u.email === 'barista@lucciole.app') {
+              setActiveSection(SECTIONS.WAREHOUSE); 
+              setActiveCategory(WAREHOUSE_CATEGORIES.BAR);
           } else {
-              setActiveSection(SECTIONS.WAREHOUSE); // Admin parte dal Magazzino
+              setActiveSection(SECTIONS.WAREHOUSE); 
           }
       }
     });
@@ -232,33 +236,21 @@ export default function App() {
 
   const handleLogout = () => signOut(auth);
 
-  // --- SALVATAGGIO (Gestisce sia Magazzino che Menù) ---
   const handleSaveItem = async (formData, docId = null) => {
     try {
-      // Dati comuni
       const payload = {
           name: formData.name,
-          category: formData.category, // Può essere 'MENU_ITEM' o una categoria stock
+          category: formData.category, 
           subcategory: formData.subcategory || "",
-          
-          // Dati specifici per Menù
-          menuType: formData.menuType || null, // DIRECT o DISH
-          linkedProductId: formData.linkedProductId || null, // ID del prodotto magazzino collegato
-          
-          // Dati specifici per Magazzino
+          menuType: formData.menuType || null,
+          linkedProductId: formData.linkedProductId || null, 
           supplier: formData.supplier || "",
           unit: formData.unit || "",
           expiryDate: formData.expiryDate || "",
-          
-          // Quantità (Stock per Magazzino, 0 per Menù solitamente)
           quantity: formData.quantity !== undefined ? formData.quantity : 0,
           minThreshold: formData.minThreshold || 0,
-          
-          // Prezzi (Visibili solo a Manager)
           costPrice: formData.costPrice, 
           sellPrice: formData.sellPrice,
-          
-          // Dosi (per Bar Stock)
           capacity: formData.capacity,
           dose: formData.dose
       };
@@ -277,14 +269,31 @@ export default function App() {
     }
   };
 
-  // --- GESTIONE VENDITA (IL PONTE TRA MENU E MAGAZZINO) ---
+  // --- GESTIONE VENDITA (CORRETTA PER MARGINE) ---
   const handleSellItem = async (menuItem) => {
       try {
-          // 1. Registra la vendita (Log Finanziario)
-          // Se NON sono manager, non vedo i costi, ma il sistema li registra comunque dai dati dell'item
           const revenue = menuItem.sellPrice || 0;
-          const estimatedCost = menuItem.costPrice || 0; // Food Cost o Costo Acquisto
+          
+          // STEP 1: Recupera il costo vero.
+          let realCost = menuItem.costPrice || 0;
 
+          // Se è un prodotto "Linkato" al magazzino, andiamo a prendere il costo aggiornato dalla scheda di magazzino
+          if (menuItem.menuType === 'DIRECT' && menuItem.linkedProductId) {
+              const linkedItemRef = doc(db, 'inventory', menuItem.linkedProductId);
+              const linkedSnap = await getDoc(linkedItemRef);
+              
+              if (linkedSnap.exists()) {
+                  // Prendi il costo di acquisto dal magazzino
+                  realCost = linkedSnap.data().costPrice || 0;
+                  
+                  // STEP 2: Scarica magazzino
+                  await updateDoc(linkedItemRef, {
+                      quantity: increment(-1)
+                  });
+              }
+          }
+
+          // STEP 3: Registra Log con Costo Reale
           await logTransaction(
               menuItem.name, 
               'VENDITA', 
@@ -292,41 +301,21 @@ export default function App() {
               userRole, 
               'Vendita da Menù', 
               revenue, 
-              estimatedCost
+              realCost // Passiamo il costo corretto (non 0)
           );
 
-          // 2. Il Ponte: Scarica il magazzino se necessario
-          if (menuItem.menuType === 'DIRECT' && menuItem.linkedProductId) {
-              const linkedItemRef = doc(db, 'inventory', menuItem.linkedProductId);
-              
-              // Verifica che il prodotto esista ancora
-              const linkedSnap = await getDoc(linkedItemRef);
-              if (linkedSnap.exists()) {
-                  // Scala 1 unità dal magazzino (es. 1 Coca Cola)
-                  await updateDoc(linkedItemRef, {
-                      quantity: increment(-1)
-                  });
-              } else {
-                  console.warn("Prodotto collegato non trovato in magazzino");
-              }
-          }
-
-          // Feedback visivo (opzionale, gestito nel componente card)
           return true;
       } catch (err) {
           console.error("Errore vendita:", err);
-          alert("Errore registrazione vendita");
           return false;
       }
   };
 
-  // --- UPDATE QTY (Solo per Magazzino: Carico/Scarico merce/Rotture) ---
+  // --- UPDATE QTY (Solo per Magazzino) ---
   const updateQty = async (id, delta, note = '') => {
     const item = items.find(i => i.id === id);
     if (!item) return;
 
-    // Se stiamo nel Menù, non usiamo questa funzione per vendere (si usa handleSellItem)
-    // Questa serve solo per modifiche stock manuali
     try {
       const newQty = Math.max(0, parseFloat((item.quantity + delta).toFixed(4)));
       await updateDoc(doc(db, 'inventory', id), {
@@ -355,30 +344,23 @@ export default function App() {
     } catch (e) { return false; }
   };
 
-  // --- FILTRI INTELLIGENTI (Divisi per Sezione) ---
   const filteredItems = useMemo(() => {
     let list = items || [];
 
-    // Filtro Archivio
     if (showArchived) list = list.filter(i => i.isArchived === true);
     else list = list.filter(i => !i.isArchived); 
 
-    // Filtro SEZIONE (Menù vs Magazzino)
     if (activeSection === SECTIONS.MENU) {
-        // Mostra solo elementi del menu
         list = list.filter(i => i.category === MENU_CATEGORY);
     } else {
-        // Mostra solo elementi magazzino (quindi NON menu)
         list = list.filter(i => i.category !== MENU_CATEGORY);
     }
 
-    // Filtro Categoria Magazzino (se attivo)
     if (activeSection === SECTIONS.WAREHOUSE) {
         if (isCook) list = list.filter(i => i.category === WAREHOUSE_CATEGORIES.CUCINA);
         else if (isBarista) list = list.filter(i => i.category === WAREHOUSE_CATEGORIES.BAR);
         else if (activeCategory !== 'TUTTI') list = list.filter(i => i.category === activeCategory);
         
-        // Filtri Stock/Scadenza (hanno senso solo in magazzino)
         if (filterMode === 'LOW_STOCK') list = list.filter(i => (i.quantity || 0) <= (i.minThreshold || 0));
         if (filterMode === 'EXPIRING') list = list.filter(i => checkExpiring(i.expiryDate));
     }
@@ -456,8 +438,8 @@ return (
           </div>
       </div>
 
-      {/* --- NAVIGAZIONE SEZIONI (MENU vs MAGAZZINO) --- */}
-      {!showArchived && (
+      {/* --- NAVIGAZIONE SEZIONI (VISIBILE SOLO A MANAGER) --- */}
+      {!showArchived && isManager && (
           <div className="bg-slate-800 p-1 rounded-2xl flex relative z-10">
               <button 
                   onClick={() => { setActiveSection(SECTIONS.MENU); setFilterMode('ALL'); }}
