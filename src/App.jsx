@@ -811,6 +811,8 @@ function AddModal({ onClose, onSave, isCook, isBarista, isManager, initialData, 
     e.preventDefault();
     const fd = new FormData(e.target);
     
+    // NOTA: Se l'input è nascosto (perché non è manager), non verrà inviato nel FormData.
+    // La logica in App.jsx (Parte 1) gestirà il mantenimento dei valori vecchi.
     const formData = {
       name: name.trim(),
       category: selectedCategory,
@@ -858,8 +860,8 @@ function AddModal({ onClose, onSave, isCook, isBarista, isManager, initialData, 
             </select>
           </div>
 
-          {/* --- SEZIONE PREZZI E CALCOLATORE --- */}
-          {selectedCategory !== CATEGORIES.LAVANDERIA && selectedCategory !== CATEGORIES.PISCINA && selectedCategory !== CATEGORIES.ALTRO && (
+          {/* --- SEZIONE PREZZI E CALCOLATORE (VISIBILE SOLO AI MANAGER) --- */}
+          {isManager && selectedCategory !== CATEGORIES.LAVANDERIA && selectedCategory !== CATEGORIES.PISCINA && selectedCategory !== CATEGORIES.ALTRO && (
             <div className="bg-slate-50 p-4 rounded-3xl border-2 border-slate-100 space-y-4">
               <div className="flex gap-4">
                   <div className="flex-1">
@@ -936,8 +938,8 @@ function AddModal({ onClose, onSave, isCook, isBarista, isManager, initialData, 
             </div>
           )}
           
-          {/* --- SEZIONE DOSI (SOLO BAR) --- */}
-          {selectedCategory === CATEGORIES.BAR && (
+          {/* --- SEZIONE DOSI (SOLO BAR E SOLO MANAGER) --- */}
+          {isManager && selectedCategory === CATEGORIES.BAR && (
               <div className="bg-blue-50 p-4 rounded-3xl border-2 border-blue-100 grid grid-cols-2 gap-4">
                   <div>
                       <label className="text-[10px] font-black uppercase text-blue-400 px-2 block mb-1">Capacità (ml)</label>
