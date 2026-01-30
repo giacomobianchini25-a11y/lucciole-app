@@ -31,7 +31,7 @@ import {
   Clock, Power, Search, Plus, X, Truck, Calendar, Trash2, Pencil, Tag, 
   BarChart3, ArrowDownCircle, ArrowUpCircle, CookingPot, CheckCircle2,
   Archive, RefreshCw, ArchiveRestore, ClipboardList, Save, CheckSquare,
-  Undo2 // Icona per annulla errore
+  Undo2, Calculator, Wallet
 } from 'lucide-react';
 
 // --- MAPPA ICONE ---
@@ -44,7 +44,7 @@ const ICON_MAP = {
   'cooking-pot': CookingPot, 'check-circle': CheckCircle2,
   'archive': Archive, 'refresh-cw': RefreshCw, 'archive-restore': ArchiveRestore,
   'clipboard-list': ClipboardList, 'save': Save, 'check-square': CheckSquare,
-  'undo-2': Undo2
+  'undo-2': Undo2, 'calculator': Calculator, 'wallet': Wallet
 };
 
 const Icon = ({ name, size = 20, className = "", strokeWidth = 2.5 }) => {
@@ -149,8 +149,10 @@ export default function App() {
   const [isShoppingListOpen, setIsShoppingListOpen] = useState(false); 
   const [showArchived, setShowArchived] = useState(false);
 
+  // --- LOGICA RUOLI ---
   const userRole = useMemo(() => {
     if (!user) return null;
+    if (user.email === 'superadmin@lucciole.app') return 'superadmin';
     if (user.email === 'admin@lucciole.app') return 'admin';
     if (user.email === 'cuoco@lucciole.app') return 'cuoco';
     if (user.email === 'barista@lucciole.app') return 'barista';
@@ -160,6 +162,8 @@ export default function App() {
   const isCook = userRole === 'cuoco';
   const isBarista = userRole === 'barista';
   const isAdmin = userRole === 'admin';
+  const isSuperAdmin = userRole === 'superadmin';
+  const isManager = isAdmin || isSuperAdmin; 
 
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(auth, (u) => {
@@ -184,7 +188,8 @@ export default function App() {
     const p = e.target.password.value;
     
     let email = '';
-    if (u === 'admin') email = 'admin@lucciole.app';
+    if (u === 'superadmin') email = 'superadmin@lucciole.app';
+    else if (u === 'admin') email = 'admin@lucciole.app';
     else if (u === 'cuoco') email = 'cuoco@lucciole.app';
     else if (u === 'barista') email = 'barista@lucciole.app';
     else { setLoginError('Utente non riconosciuto.'); return; }
@@ -210,7 +215,9 @@ export default function App() {
           supplier: formData.supplier || "",
           subcategory: formData.subcategory || "",
           unit: formData.unit,
-          expiryDate: formData.expiryDate
+          expiryDate: formData.expiryDate,
+          costPrice: formData.costPrice,
+          sellPrice: formData.sellPrice
         });
         await logTransaction(formData.name, formData.category, 0, userRole + " (Edit)");
       } else {
@@ -225,7 +232,9 @@ export default function App() {
             quantity: (existing.quantity || 0) + formData.quantity,
             minThreshold: formData.minThreshold || existing.minThreshold,
             supplier: formData.supplier || existing.supplier || "",
-            subcategory: formData.subcategory || existing.subcategory || ""
+            subcategory: formData.subcategory || existing.subcategory || "",
+            costPrice: formData.costPrice || existing.costPrice || 0,
+            sellPrice: formData.sellPrice || existing.sellPrice || 0
           });
           await logTransaction(existing.name, existing.category, formData.quantity, userRole);
         } else {
@@ -346,23 +355,24 @@ export default function App() {
           </p>
         </div>
         <div className="flex gap-2">
-            {isAdmin && (
-                <>
-                    <button 
-                        onClick={() => {
-                            setShowArchived(!showArchived);
-                            setActiveCategory('TUTTI');
-                        }} 
-                        className={`p-3 rounded-full transition-all ${showArchived ? 'bg-yellow-400 text-black shadow-[0_0_15px_rgba(250,204,21,0.5)]' : 'bg-white/10 text-slate-400 hover:text-white'}`}
-                    >
-                        <Icon name={showArchived ? "archive-restore" : "archive"} size={20} />
-                    </button>
-
-                    <button onClick={() => setIsStatsOpen(true)} className="bg-white/10 text-yellow-400 p-3 rounded-full hover:bg-white/20 transition-all">
-                        <Icon name="bar-chart" size={20} />
-                    </button>
-                </>
+            {isManager && (
+                <button 
+                    onClick={() => {
+                        setShowArchived(!showArchived);
+                        setActiveCategory('TUTTI');
+                    }} 
+                    className={`p-3 rounded-full transition-all ${showArchived ? 'bg-yellow-400 text-black shadow-[0_0_15px_rgba(250,204,21,0.5)]' : 'bg-white/10 text-slate-400 hover:text-white'}`}
+                >
+                    <Icon name={showArchived ? "archive-restore" : "archive"} size={20} />
+                </button>
             )}
+
+            {isSuperAdmin && (
+                <button onClick={() => setIsStatsOpen(true)} className="bg-white/10 text-yellow-400 p-3 rounded-full hover:bg-white/20 transition-all">
+                    <Icon name="bar-chart" size={20} />
+                </button>
+            )}
+            
             <button onClick={handleLogout} className="bg-red-50 text-red-600 px-4 py-2 rounded-full border border-red-100 hover:bg-red-100 font-black text-[10px] uppercase tracking-widest transition-all shadow-md active:scale-95">
             Esci
             </button>
@@ -437,6 +447,7 @@ export default function App() {
           onSave={handleSaveItem} 
           isCook={isCook} 
           isBarista={isBarista} 
+          isManager={isManager} 
           initialData={itemToEdit}
           nameSuggestions={[...new Set(items.map(i => i.name || ""))]} 
           supplierSuggestions={[...new Set(items.filter(i => i.supplier).map(i => i.supplier || ""))]} 
@@ -448,15 +459,15 @@ export default function App() {
         <DetailModal 
           item={selectedItem} 
           onClose={() => setSelectedItem(null)} 
-          isAdmin={isAdmin} 
+          isManager={isManager} 
           onEdit={() => openEditModal(selectedItem)}
           onDelete={async (id) => { if(confirm("Eliminare?")) { await deleteDoc(doc(db, 'inventory', id)); setSelectedItem(null); } }} 
           onToggleArchive={() => toggleArchiveItem(selectedItem.id, selectedItem.isArchived)}
-          onUpdate={updateQty} // Passiamo onUpdate al modal
+          onUpdate={updateQty}
         />
       )}
 
-      {isStatsOpen && isAdmin && (
+      {isStatsOpen && isSuperAdmin && (
           <StatsModal onClose={() => setIsStatsOpen(false)} items={items} />
       )}
 
@@ -465,6 +476,7 @@ export default function App() {
             onClose={() => setIsShoppingListOpen(false)} 
             isCook={isCook}
             isBarista={isBarista}
+            isManager={isManager}
           />
       )}
     </div>
@@ -472,7 +484,7 @@ export default function App() {
 }
 
 // --- MODALE LISTA SPESA (LAVAGNA COMPLETA CON PERMESSI) ---
-function ShoppingListModal({ onClose, isCook, isBarista }) {
+function ShoppingListModal({ onClose, isCook, isBarista, isManager }) {
     const visibleTabs = useMemo(() => {
         if (isCook) return SHOPPING_TABS.filter(t => t.id === 'ristorante');
         if (isBarista) return SHOPPING_TABS.filter(t => t.id === 'bar');
@@ -553,8 +565,6 @@ function ShoppingListModal({ onClose, isCook, isBarista }) {
         <div className="fixed inset-0 z-[500] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}></div>
             <div className="relative bg-white w-full max-w-2xl rounded-[2.5rem] overflow-hidden shadow-2xl animate-modal flex flex-col h-[90vh]">
-                
-                {/* HEADER CON TAB SCORREVOLI */}
                 <div className="p-3 bg-slate-100 flex gap-2 overflow-x-auto no-scrollbar items-center border-b border-slate-200">
                     <button onClick={onClose} className="flex-shrink-0 w-12 h-12 flex items-center justify-center text-slate-400 hover:text-red-500 transition-colors bg-white rounded-2xl mr-1">
                         <Icon name="x" size={24} />
@@ -702,18 +712,61 @@ function ItemCard({ item, onUpdate, onDetails, isExpiringSoon }) {
   );
 }
 
-function AddModal({ onClose, onSave, isCook, isBarista, initialData, nameSuggestions, supplierSuggestions, subcategorySuggestions }) {
+// --- MODALE AGGIUNTA (CON CALCULATOR) ---
+function AddModal({ onClose, onSave, isCook, isBarista, isManager, initialData, nameSuggestions, supplierSuggestions, subcategorySuggestions }) {
   const [name, setName] = useState(initialData?.name || '');
   const [supplier, setSupplier] = useState(initialData?.supplier || '');
   const [subcategory, setSubcategory] = useState(initialData?.subcategory || '');
+  
+  // STATI PER IL CALCULATOR
+  const [selectedCategory, setSelectedCategory] = useState(initialData?.category || (isCook ? CATEGORIES.RISTORANTE : isBarista ? CATEGORIES.BAR : CATEGORIES.RISTORANTE));
+  const [costPrice, setCostPrice] = useState(initialData?.costPrice || '');
+  const [sellPrice, setSellPrice] = useState(initialData?.sellPrice || '');
+  
+  // SLIDERS
+  const [foodCostPercent, setFoodCostPercent] = useState(30); // 15-40
+  const [staffPercent, setStaffPercent] = useState(30); // 15-40
+  const [utilityPercent, setUtilityPercent] = useState(10); // 5-20
+  const [barMultiplier, setBarMultiplier] = useState(4); // 3-7
+
+  // CALCOLO AUTOMATICO CONSIGLIATO
+  const calculatorResult = useMemo(() => {
+      const cost = parseFloat(costPrice);
+      if (!cost || isNaN(cost)) return null;
+
+      // LOGICA RISTORANTE (COMPLESSA)
+      if (selectedCategory === CATEGORIES.RISTORANTE || selectedCategory === CATEGORIES.PIATTI) {
+          const recommendedPrice = cost / (foodCostPercent / 100);
+          const staffCost = recommendedPrice * (staffPercent / 100);
+          const utilityCost = recommendedPrice * (utilityPercent / 100);
+          const netProfit = recommendedPrice - cost - staffCost - utilityCost;
+          const netProfitPercent = (netProfit / recommendedPrice) * 100;
+
+          return {
+              type: 'COMPLEX',
+              recPrice: recommendedPrice,
+              breakdown: { cost, staffCost, utilityCost, netProfit, netProfitPercent }
+          };
+      } 
+      // LOGICA BAR (SEMPLICE)
+      else if (selectedCategory === CATEGORIES.BAR) {
+          const recommendedPrice = cost * barMultiplier;
+          const drinkCost = (cost / recommendedPrice) * 100;
+          const grossMargin = recommendedPrice - cost;
+
+          return {
+              type: 'SIMPLE',
+              recPrice: recommendedPrice,
+              breakdown: { drinkCost, grossMargin }
+          };
+      }
+      return null;
+  }, [costPrice, selectedCategory, foodCostPercent, staffPercent, utilityPercent, barMultiplier]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
-    let selectedCategory = fd.get('category');
-    if (isCook) selectedCategory = CATEGORIES.RISTORANTE;
-    if (isBarista) selectedCategory = CATEGORIES.BAR;
-
+    
     const formData = {
       name: name.trim(),
       category: selectedCategory,
@@ -722,7 +775,9 @@ function AddModal({ onClose, onSave, isCook, isBarista, initialData, nameSuggest
       supplier: supplier.trim(),
       subcategory: subcategory.trim(),
       unit: fd.get('unit') || '',
-      expiryDate: fd.get('expiry') || ''
+      expiryDate: fd.get('expiry') || '',
+      costPrice: parseFloat(costPrice) || 0,
+      sellPrice: parseFloat(sellPrice) || 0
     };
     onSave(formData, initialData?.id);
   };
@@ -730,17 +785,25 @@ function AddModal({ onClose, onSave, isCook, isBarista, initialData, nameSuggest
   return (
     <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}></div>
-      <div className="relative bg-white w-full max-w-lg rounded-[2.5rem] overflow-hidden shadow-2xl animate-modal flex flex-col max-h-[90vh]">
-        <div className="p-8 border-b flex justify-between items-center">
-          <h2 className="text-3xl font-black uppercase italic tracking-tighter text-slate-900">
+      <div className="relative bg-white w-full max-w-lg rounded-[2.5rem] overflow-hidden shadow-2xl animate-modal flex flex-col max-h-[95vh]">
+        <div className="p-6 border-b flex justify-between items-center bg-slate-50">
+          <h2 className="text-2xl font-black uppercase italic tracking-tighter text-slate-900">
              {initialData ? "Modifica" : "Nuovo Carico"}
           </h2>
           <button onClick={onClose} className="text-slate-400 hover:text-red-500 transition-colors"><Icon name="x" size={32} /></button>
         </div>
-        <form onSubmit={handleSubmit} className="p-8 space-y-6 overflow-y-auto no-scrollbar">
+        
+        <form onSubmit={handleSubmit} className="p-6 space-y-6 overflow-y-auto no-scrollbar">
           <Autocomplete label="Articolo" value={name} onChange={setName} suggestions={nameSuggestions} placeholder="Cerca o inserisci..." className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none focus:border-slate-900 transition-all" />
+          
           <div className="grid grid-cols-2 gap-4">
-            <select name="category" disabled={isCook || isBarista} className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none disabled:bg-slate-50" defaultValue={initialData?.category || (isCook ? CATEGORIES.RISTORANTE : isBarista ? CATEGORIES.BAR : CATEGORIES.RISTORANTE)}>
+            <select 
+                name="category" 
+                disabled={!isManager} 
+                className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none disabled:bg-slate-50" 
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+            >
               {Object.values(CATEGORIES).map(c => <option key={c} value={c}>{c}</option>)}
             </select>
             <select name="unit" className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none" defaultValue={initialData?.unit || ""}>
@@ -748,6 +811,84 @@ function AddModal({ onClose, onSave, isCook, isBarista, initialData, nameSuggest
               {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
             </select>
           </div>
+
+          {/* --- SEZIONE PREZZI E CALCOLATORE --- */}
+          <div className="bg-slate-50 p-4 rounded-3xl border-2 border-slate-100 space-y-4">
+              <div className="flex gap-4">
+                  <div className="flex-1">
+                      <label className="text-[10px] font-black uppercase text-slate-500 px-2 block mb-1">Costo Acquisto (€)</label>
+                      <input type="number" step="0.01" value={costPrice} onChange={e => setCostPrice(e.target.value)} className="w-full border-2 border-slate-200 rounded-xl p-3 font-bold outline-none focus:border-slate-900" placeholder="0.00" />
+                  </div>
+                  <div className="flex-1">
+                      <label className="text-[10px] font-black uppercase text-slate-500 px-2 block mb-1">Prezzo Menu (€)</label>
+                      <input type="number" step="0.01" value={sellPrice} onChange={e => setSellPrice(e.target.value)} className="w-full border-2 border-slate-200 rounded-xl p-3 font-bold outline-none focus:border-blue-600 text-blue-600" placeholder="0.00" />
+                  </div>
+              </div>
+
+              {/* CALCOLATORE DINAMICO */}
+              {calculatorResult && (
+                  <div className={`rounded-2xl p-4 space-y-3 ${calculatorResult.type === 'COMPLEX' ? 'bg-orange-50 border border-orange-200' : 'bg-blue-50 border border-blue-200'}`}>
+                      <div className="flex justify-between items-center border-b border-black/5 pb-2">
+                          <span className="text-[10px] font-black uppercase tracking-widest opacity-50 flex gap-1"><Icon name="calculator" size={14} /> Analisi Prezzo</span>
+                          <span className="text-xl font-black">{calculatorResult.recPrice.toFixed(2)} € <span className="text-[10px] font-bold text-slate-400">CONSIGLIATO</span></span>
+                      </div>
+
+                      {/* SLIDERS PER RISTORANTE */}
+                      {calculatorResult.type === 'COMPLEX' && (
+                          <div className="space-y-3 pt-2">
+                              <div>
+                                  <div className="flex justify-between text-[9px] font-bold uppercase text-slate-500 mb-1">
+                                      <span>Incidenza Materia ({foodCostPercent}%)</span>
+                                  </div>
+                                  <input type="range" min="15" max="40" value={foodCostPercent} onChange={e => setFoodCostPercent(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-orange-600" />
+                              </div>
+                              <div>
+                                  <div className="flex justify-between text-[9px] font-bold uppercase text-slate-500 mb-1">
+                                      <span>Incidenza Staff ({staffPercent}%)</span>
+                                      <span>{calculatorResult.breakdown.staffCost.toFixed(2)}€</span>
+                                  </div>
+                                  <input type="range" min="15" max="40" value={staffPercent} onChange={e => setStaffPercent(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-600" />
+                              </div>
+                              <div>
+                                  <div className="flex justify-between text-[9px] font-bold uppercase text-slate-500 mb-1">
+                                      <span>Incidenza Utenze ({utilityPercent}%)</span>
+                                      <span>{calculatorResult.breakdown.utilityCost.toFixed(2)}€</span>
+                                  </div>
+                                  <input type="range" min="5" max="20" value={utilityPercent} onChange={e => setUtilityPercent(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-400" />
+                              </div>
+                              <div className="mt-2 pt-2 border-t border-orange-200 flex justify-between items-center text-orange-900">
+                                  <span className="text-[10px] font-black uppercase">Utile Netto Stimato</span>
+                                  <span className="font-black text-lg">{calculatorResult.breakdown.netProfit.toFixed(2)}€ ({calculatorResult.breakdown.netProfitPercent.toFixed(0)}%)</span>
+                              </div>
+                          </div>
+                      )}
+
+                      {/* SLIDERS PER BAR */}
+                      {calculatorResult.type === 'SIMPLE' && (
+                          <div className="space-y-3 pt-2">
+                              <div>
+                                  <div className="flex justify-between text-[9px] font-bold uppercase text-slate-500 mb-1">
+                                      <span>Moltiplicatore (x{barMultiplier})</span>
+                                  </div>
+                                  <input type="range" min="3" max="7" step="0.5" value={barMultiplier} onChange={e => setBarMultiplier(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600" />
+                              </div>
+                              <div className="flex gap-2">
+                                  <div className="bg-white/50 p-2 rounded-lg flex-1 text-center border border-blue-100">
+                                      <span className="block text-[8px] font-black uppercase text-blue-400">Drink Cost</span>
+                                      <span className="font-black text-blue-900">{calculatorResult.breakdown.drinkCost.toFixed(0)}%</span>
+                                  </div>
+                                  <div className="bg-white/50 p-2 rounded-lg flex-1 text-center border border-blue-100">
+                                      <span className="block text-[8px] font-black uppercase text-blue-400">Margine</span>
+                                      <span className="font-black text-blue-900">{calculatorResult.breakdown.grossMargin.toFixed(2)}€</span>
+                                  </div>
+                              </div>
+                          </div>
+                      )}
+                  </div>
+              )}
+          </div>
+          {/* --------------------------- */}
+
           <div className="grid grid-cols-2 gap-4">
             <input name="quantity" type="number" step="0.1" required defaultValue={initialData?.quantity || "0"} className="w-full border-4 border-slate-100 rounded-2xl p-4 text-3xl font-black focus:border-slate-900 outline-none transition-all" placeholder="Q.tà" />
             <input name="minThreshold" type="number" step="0.1" required defaultValue={initialData?.minThreshold || "0"} className="w-full border-4 border-slate-100 rounded-2xl p-4 text-3xl font-black focus:border-slate-900 outline-none transition-all" placeholder="Soglia" />
@@ -764,7 +905,7 @@ function AddModal({ onClose, onSave, isCook, isBarista, initialData, nameSuggest
   );
 }
 
-function DetailModal({ item, onClose, onDelete, onEdit, onToggleArchive, onUpdate, isAdmin }) {
+function DetailModal({ item, onClose, onDelete, onEdit, onToggleArchive, onUpdate, isManager }) {
   const isPiatti = item?.category === CATEGORIES.PIATTI;
   const isLow = !isPiatti && (item?.quantity || 0) <= (item?.minThreshold || 0);
   const meta = CATEGORIES_META[item?.category] || CATEGORIES_META[CATEGORIES.ALTRO];
@@ -776,7 +917,7 @@ function DetailModal({ item, onClose, onDelete, onEdit, onToggleArchive, onUpdat
         <div className="p-8 pb-2">
           <div className="flex justify-between items-start">
              <div className={`px-4 py-2 rounded-xl inline-flex ${meta.color} text-white text-[10px] font-black uppercase mb-4 shadow-md`}><Icon name={meta.icon} size={14} className="mr-2" /> {item?.category}</div>
-             {isAdmin && (
+             {isManager && (
                <button onClick={onEdit} className="bg-blue-50 text-blue-600 p-3 rounded-xl border border-blue-100 hover:bg-blue-100 transition-all flex items-center gap-2 font-black text-[10px] uppercase">
                  <Icon name="pencil" size={16} /> Modifica
                </button>
@@ -800,7 +941,6 @@ function DetailModal({ item, onClose, onDelete, onEdit, onToggleArchive, onUpdat
                     <p className="text-slate-500 font-bold italic">Prodotto "A Flusso"</p>
                     <p className="text-xs text-slate-400">La quantità non viene tracciata, solo le vendite.</p>
                   </div>
-                  {/* TASTO ANNULLA ERRORE PER PIATTI */}
                   <button onClick={() => { onUpdate(item.id, 1); onClose(); }} className="px-4 py-2 bg-red-50 text-red-600 rounded-xl font-black text-[10px] uppercase border border-red-100 hover:bg-red-100 flex items-center gap-2">
                       <Icon name="undo-2" size={14} /> Annulla Errore (+1)
                   </button>
@@ -820,7 +960,7 @@ function DetailModal({ item, onClose, onDelete, onEdit, onToggleArchive, onUpdat
           {item?.expiryDate && <div className="p-5 rounded-2xl border-2 bg-orange-50 border-orange-200 text-orange-900"><p className="text-[10px] font-black uppercase mb-1 flex items-center gap-2"><Icon name="calendar" size={14} /> Scadenza</p><p className="text-xl font-black uppercase">{new Date(item.expiryDate).toLocaleDateString('it-IT')}</p></div>}
           
           <div className="flex gap-3 pt-4 flex-col">
-            {isAdmin && item.category === CATEGORIES.PIATTI && (
+            {isManager && item.category === CATEGORIES.PIATTI && (
                 <button 
                     onClick={onToggleArchive} 
                     className={`p-4 rounded-2xl font-black text-sm uppercase flex items-center justify-center gap-2 transition-all ${item.isArchived ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'}`}
@@ -831,7 +971,7 @@ function DetailModal({ item, onClose, onDelete, onEdit, onToggleArchive, onUpdat
             )}
 
             <div className="flex gap-3">
-                {isAdmin && <button onClick={() => onDelete(item.id)} className="p-5 bg-red-50 text-red-600 rounded-2xl font-black border-2 border-red-100 hover:bg-red-100 transition-all"><Icon name="trash-2" size={24} /></button>}
+                {isManager && <button onClick={() => onDelete(item.id)} className="p-5 bg-red-50 text-red-600 rounded-2xl font-black border-2 border-red-100 hover:bg-red-100 transition-all"><Icon name="trash-2" size={24} /></button>}
                 <button onClick={onClose} className="flex-1 bg-slate-200 text-slate-700 p-5 rounded-2xl font-black text-xl uppercase tracking-tighter hover:bg-slate-300 transition-all">CHIUDI</button>
             </div>
           </div>
