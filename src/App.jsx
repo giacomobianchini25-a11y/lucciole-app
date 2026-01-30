@@ -15,15 +15,23 @@ import {
   query, 
   where, 
   getDocs,
-  orderBy 
+  orderBy,
+  getDoc,
+  setDoc
 } from 'firebase/firestore';
+
+// --- IMPORTAZIONE LIBRERIA GRAFICI ---
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
+} from 'recharts';
 
 // --- IMPORTAZIONE ICONE ---
 import { 
   Wine, Utensils, Bed, Waves, Package, ChevronRight, AlertTriangle, 
   Clock, Power, Search, Plus, X, Truck, Calendar, Trash2, Pencil, Tag, 
   BarChart3, ArrowDownCircle, ArrowUpCircle, CookingPot, CheckCircle2,
-  Archive, RefreshCw, ArchiveRestore // Nuove icone per Archivio
+  Archive, RefreshCw, ArchiveRestore, ClipboardList, Save, CheckSquare,
+  Undo2 // Icona per annulla errore
 } from 'lucide-react';
 
 // --- MAPPA ICONE ---
@@ -34,7 +42,9 @@ const ICON_MAP = {
   'truck': Truck, 'calendar': Calendar, 'trash-2': Trash2, 'pencil': Pencil, 
   'tag': Tag, 'bar-chart': BarChart3, 'arrow-down': ArrowDownCircle, 'arrow-up': ArrowUpCircle,
   'cooking-pot': CookingPot, 'check-circle': CheckCircle2,
-  'archive': Archive, 'refresh-cw': RefreshCw, 'archive-restore': ArchiveRestore
+  'archive': Archive, 'refresh-cw': RefreshCw, 'archive-restore': ArchiveRestore,
+  'clipboard-list': ClipboardList, 'save': Save, 'check-square': CheckSquare,
+  'undo-2': Undo2
 };
 
 const Icon = ({ name, size = 20, className = "", strokeWidth = 2.5 }) => {
@@ -47,7 +57,7 @@ const CATEGORIES = {
   BAR: 'Bar',
   RISTORANTE: 'Ristorante',
   PIATTI: 'Piatti',
-  BIANCHERIA: 'Biancheria e Prodotti',
+  LAVANDERIA: 'Lavanderia',
   PISCINA: 'Piscina',
   ALTRO: 'Altro'
 };
@@ -58,10 +68,20 @@ const CATEGORIES_META = {
   [CATEGORIES.BAR]: { icon: 'wine', color: 'bg-blue-700', text: 'text-blue-900', border: 'border-blue-300' },
   [CATEGORIES.RISTORANTE]: { icon: 'utensils', color: 'bg-orange-600', text: 'text-orange-900', border: 'border-orange-300' },
   [CATEGORIES.PIATTI]: { icon: 'cooking-pot', color: 'bg-rose-600', text: 'text-rose-900', border: 'border-rose-300' },
-  [CATEGORIES.BIANCHERIA]: { icon: 'bed', color: 'bg-purple-700', text: 'text-purple-900', border: 'border-purple-300' },
+  [CATEGORIES.LAVANDERIA]: { icon: 'bed', color: 'bg-purple-700', text: 'text-purple-900', border: 'border-purple-300' },
   [CATEGORIES.PISCINA]: { icon: 'waves', color: 'bg-cyan-700', text: 'text-cyan-900', border: 'border-cyan-300' },
   [CATEGORIES.ALTRO]: { icon: 'package', color: 'bg-slate-700', text: 'text-slate-900', border: 'border-slate-300' }
 };
+
+// --- CONFIGURAZIONE TAB LISTA SPESA ---
+const SHOPPING_TABS = [
+    { id: 'ALL', label: 'TUTTO', icon: 'clipboard-list', color: 'bg-slate-800' },
+    { id: 'bar', label: 'BAR', icon: 'wine', color: 'bg-blue-700' },
+    { id: 'ristorante', label: 'RISTORANTE', icon: 'utensils', color: 'bg-orange-600' },
+    { id: 'lavanderia', label: 'LAVANDERIA', icon: 'bed', color: 'bg-purple-700' },
+    { id: 'piscina', label: 'PISCINA', icon: 'waves', color: 'bg-cyan-700' },
+    { id: 'altro', label: 'ALTRO', icon: 'package', color: 'bg-slate-700' }
+];
 
 // --- UI COMPONENTS ---
 const Autocomplete = ({ value, onChange, suggestions, placeholder, className, label, required = true }) => {
@@ -126,8 +146,7 @@ export default function App() {
   const [itemToEdit, setItemToEdit] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
   const [isStatsOpen, setIsStatsOpen] = useState(false);
-  
-  // NUOVO STATO: MOSTRARE GLI ARCHIVIATI
+  const [isShoppingListOpen, setIsShoppingListOpen] = useState(false); 
   const [showArchived, setShowArchived] = useState(false);
 
   const userRole = useMemo(() => {
@@ -240,13 +259,12 @@ export default function App() {
     } catch (err) { console.error(err); }
   };
 
-  // Funzione per Archiviare/Ripristinare
   const toggleArchiveItem = async (id, currentStatus) => {
     try {
       await updateDoc(doc(db, 'inventory', id), {
         isArchived: !currentStatus
       });
-      setSelectedItem(null); // Chiude la modale dopo l'azione
+      setSelectedItem(null); 
     } catch (err) { console.error(err); }
   };
 
@@ -260,17 +278,13 @@ export default function App() {
     } catch (e) { return false; }
   };
 
-  // --- FILTRO POTENZIATO CON LOGICA ARCHIVIO ---
   const filteredItems = useMemo(() => {
     let list = items || [];
 
-    // Filtro Archivio: 
-    // Se showArchived è VERO -> Mostra SOLO gli archiviati (Obsoleti)
-    // Se showArchived è FALSO -> Mostra SOLO quelli attivi
     if (showArchived) {
         list = list.filter(i => i.isArchived === true);
     } else {
-        list = list.filter(i => !i.isArchived); // Nasconde gli obsoleti di default
+        list = list.filter(i => !i.isArchived); 
     }
 
     if (isCook) list = list.filter(i => (i.category || "") === CATEGORIES.RISTORANTE);
@@ -289,9 +303,8 @@ export default function App() {
       );
     }
     return list.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-  }, [items, activeCategory, filterMode, searchQuery, isCook, isBarista, showArchived]); // Dipendenza showArchived aggiunta
+  }, [items, activeCategory, filterMode, searchQuery, isCook, isBarista, showArchived]);
 
-  // Low stock esclude obsoleti e piatti
   const lowStockCount = useMemo(() => items.filter(i => !i.isArchived && i.category !== CATEGORIES.PIATTI && (i.quantity || 0) <= (i.minThreshold || 0)).length, [items]);
   const expiringCount = useMemo(() => items.filter(i => !i.isArchived && checkExpiring(i.expiryDate)).length, [items]);
 
@@ -325,7 +338,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen pb-44">
-      {/* HEADER SPECIALE: Se in modalità Archivio, cambia colore */}
       <header className={`p-8 flex justify-between items-center shadow-xl transition-colors ${showArchived ? 'bg-slate-800 border-b-4 border-yellow-500' : 'bg-slate-900 text-white'}`}>
         <div>
           <h1 className="text-3xl font-black uppercase italic tracking-tighter text-yellow-400 leading-none">Lucciole</h1>
@@ -336,11 +348,10 @@ export default function App() {
         <div className="flex gap-2">
             {isAdmin && (
                 <>
-                    {/* TASTO TOGGLE ARCHIVIO */}
                     <button 
                         onClick={() => {
                             setShowArchived(!showArchived);
-                            setActiveCategory('TUTTI'); // Resetta categoria per evitare confusione
+                            setActiveCategory('TUTTI');
                         }} 
                         className={`p-3 rounded-full transition-all ${showArchived ? 'bg-yellow-400 text-black shadow-[0_0_15px_rgba(250,204,21,0.5)]' : 'bg-white/10 text-slate-400 hover:text-white'}`}
                     >
@@ -408,11 +419,17 @@ export default function App() {
         </div>
       </main>
 
-      {!showArchived && (
-          <button onClick={openNewItemModal} className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-8 py-4 rounded-full shadow-[0_4px_14px_0_rgba(0,118,255,0.39)] flex items-center justify-center gap-3 active:scale-95 hover:bg-blue-700 hover:-translate-y-1 transition-all z-[200] font-black uppercase tracking-widest text-sm w-11/12 max-w-sm">
-            <Icon name="plus" size={24} strokeWidth={3} /> Aggiungi Prodotto
+      <div className="fixed bottom-8 left-1/2 -translate-x-1/2 w-11/12 max-w-sm flex gap-3 z-[200]">
+          {!showArchived && (
+            <button onClick={openNewItemModal} className="flex-1 bg-blue-600 text-white px-6 py-4 rounded-full shadow-[0_4px_14px_0_rgba(0,118,255,0.39)] flex items-center justify-center gap-3 active:scale-95 hover:bg-blue-700 hover:-translate-y-1 transition-all font-black uppercase tracking-widest text-sm">
+                <Icon name="plus" size={24} strokeWidth={3} /> Aggiungi
+            </button>
+          )}
+          
+          <button onClick={() => setIsShoppingListOpen(true)} className="w-16 bg-white text-slate-900 border-4 border-slate-200 rounded-full shadow-lg flex items-center justify-center active:scale-95 hover:bg-slate-50 transition-all">
+              <Icon name="clipboard-list" size={24} strokeWidth={2.5} />
           </button>
-      )}
+      </div>
 
       {isAddModalOpen && (
         <AddModal 
@@ -434,15 +451,176 @@ export default function App() {
           isAdmin={isAdmin} 
           onEdit={() => openEditModal(selectedItem)}
           onDelete={async (id) => { if(confirm("Eliminare?")) { await deleteDoc(doc(db, 'inventory', id)); setSelectedItem(null); } }} 
-          onToggleArchive={() => toggleArchiveItem(selectedItem.id, selectedItem.isArchived)} // Nuova funzione passata
+          onToggleArchive={() => toggleArchiveItem(selectedItem.id, selectedItem.isArchived)}
+          onUpdate={updateQty} // Passiamo onUpdate al modal
         />
       )}
 
       {isStatsOpen && isAdmin && (
           <StatsModal onClose={() => setIsStatsOpen(false)} items={items} />
       )}
+
+      {isShoppingListOpen && (
+          <ShoppingListModal 
+            onClose={() => setIsShoppingListOpen(false)} 
+            isCook={isCook}
+            isBarista={isBarista}
+          />
+      )}
     </div>
   );
+}
+
+// --- MODALE LISTA SPESA (LAVAGNA COMPLETA CON PERMESSI) ---
+function ShoppingListModal({ onClose, isCook, isBarista }) {
+    const visibleTabs = useMemo(() => {
+        if (isCook) return SHOPPING_TABS.filter(t => t.id === 'ristorante');
+        if (isBarista) return SHOPPING_TABS.filter(t => t.id === 'bar');
+        return SHOPPING_TABS; 
+    }, [isCook, isBarista]);
+
+    const [activeTab, setActiveTab] = useState(() => {
+        if (isCook) return 'ristorante';
+        if (isBarista) return 'bar';
+        return 'ALL';
+    });
+
+    const [notes, setNotes] = useState({
+        bar: '',
+        ristorante: '',
+        lavanderia: '',
+        piscina: '',
+        altro: ''
+    });
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        const fetchNote = async () => {
+            const docRef = doc(db, 'general', 'shoppingList');
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                setNotes({
+                    bar: data.contentBar || '',
+                    ristorante: data.contentRistorante !== undefined ? data.contentRistorante : (data.contentKitchen || ''),
+                    lavanderia: data.contentLavanderia !== undefined ? data.contentLavanderia : (data.contentBiancheria || ''), 
+                    piscina: data.contentPiscina || '',
+                    altro: data.contentAltro || ''
+                });
+            }
+        };
+        fetchNote();
+    }, []);
+
+    const saveNotes = async (updatedNotes = notes) => {
+        setSaving(true);
+        try {
+            await setDoc(doc(db, 'general', 'shoppingList'), {
+                contentBar: updatedNotes.bar,
+                contentRistorante: updatedNotes.ristorante,
+                contentLavanderia: updatedNotes.lavanderia,
+                contentPiscina: updatedNotes.piscina,
+                contentAltro: updatedNotes.altro,
+                updatedAt: new Date().toISOString()
+            }, { merge: true });
+        } catch (e) {
+            alert("Errore salvataggio: " + e.message);
+        }
+        setSaving(false);
+    };
+
+    const handleClearCurrent = async () => {
+        if (activeTab === 'ALL') {
+            if(confirm("ATTENZIONE: Stai per svuotare TUTTE le liste spesa di tutti i reparti. Confermi che è arrivata tutta la merce?")) {
+                const emptyNotes = { bar: '', ristorante: '', lavanderia: '', piscina: '', altro: '' };
+                setNotes(emptyNotes);
+                await saveNotes(emptyNotes);
+            }
+        } else {
+            if(confirm(`Svuotare la lista ${SHOPPING_TABS.find(t => t.id === activeTab)?.label}?`)) {
+                const newNotes = { ...notes, [activeTab]: '' };
+                setNotes(newNotes);
+                await saveNotes(newNotes);
+            }
+        }
+    };
+
+    const handleNoteChange = (text) => {
+        setNotes(prev => ({ ...prev, [activeTab]: text }));
+    };
+
+    return (
+        <div className="fixed inset-0 z-[500] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}></div>
+            <div className="relative bg-white w-full max-w-2xl rounded-[2.5rem] overflow-hidden shadow-2xl animate-modal flex flex-col h-[90vh]">
+                
+                {/* HEADER CON TAB SCORREVOLI */}
+                <div className="p-3 bg-slate-100 flex gap-2 overflow-x-auto no-scrollbar items-center border-b border-slate-200">
+                    <button onClick={onClose} className="flex-shrink-0 w-12 h-12 flex items-center justify-center text-slate-400 hover:text-red-500 transition-colors bg-white rounded-2xl mr-1">
+                        <Icon name="x" size={24} />
+                    </button>
+                    {visibleTabs.map(tab => (
+                        <button 
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id)} 
+                            className={`flex-shrink-0 px-5 py-3 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center gap-2 transition-all ${activeTab === tab.id ? `${tab.color} text-white shadow-md scale-105` : 'bg-white text-slate-400 border border-slate-200 hover:bg-slate-50'}`}
+                        >
+                            <Icon name={tab.icon} size={16} /> {tab.label}
+                        </button>
+                    ))}
+                </div>
+
+                <div className="flex-1 p-0 bg-white relative overflow-y-auto">
+                    {activeTab === 'ALL' ? (
+                        <div className="p-6 space-y-8">
+                            <h3 className="text-2xl font-black text-slate-900 uppercase italic tracking-tighter mb-4 flex items-center gap-2">
+                                <Icon name="clipboard-list" size={28} /> Riepilogo Ordini
+                            </h3>
+                            {SHOPPING_TABS.filter(t => t.id !== 'ALL').map(tab => {
+                                const content = notes[tab.id];
+                                if (!content || !content.trim()) return null;
+                                return (
+                                    <div key={tab.id} className="border-l-4 border-slate-200 pl-4 py-1">
+                                        <h4 className={`font-black uppercase text-sm ${tab.color.replace('bg-', 'text-')} mb-2 flex items-center gap-2`}>
+                                            <Icon name={tab.icon} size={16} /> {tab.label}
+                                        </h4>
+                                        <pre className="whitespace-pre-wrap font-medium text-slate-600 text-lg leading-relaxed font-sans">
+                                            {content}
+                                        </pre>
+                                    </div>
+                                );
+                            })}
+                            {Object.values(notes).every(v => !v.trim()) && (
+                                <div className="text-center text-slate-300 font-bold py-10 italic">
+                                    Nessuna merce da ordinare al momento.
+                                </div>
+                            )}
+                        </div>
+                    ) : (
+                        <textarea 
+                            className="w-full h-full p-6 text-xl font-medium text-slate-700 placeholder:text-slate-300 outline-none resize-none"
+                            placeholder={`Scrivi qui la lista per ${SHOPPING_TABS.find(t => t.id === activeTab)?.label}...`}
+                            value={notes[activeTab] || ''}
+                            onChange={(e) => handleNoteChange(e.target.value)}
+                        ></textarea>
+                    )}
+                </div>
+
+                <div className="p-4 border-t bg-slate-50 flex flex-col gap-3">
+                    {activeTab !== 'ALL' && (
+                        <button onClick={() => saveNotes()} disabled={saving} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black text-xl hover:bg-black active:scale-95 transition-all flex items-center justify-center gap-2">
+                            <Icon name="save" size={20} /> {saving ? "Salvataggio..." : "Salva Modifiche"}
+                        </button>
+                    )}
+                    
+                    <button onClick={handleClearCurrent} className="w-full bg-green-100 text-green-700 border-2 border-green-200 py-3 rounded-2xl font-black text-sm hover:bg-green-200 active:scale-95 transition-all flex items-center justify-center gap-2">
+                        <Icon name="check-square" size={18} /> 
+                        {activeTab === 'ALL' ? "MERCE ARRIVATA (Svuota TUTTO)" : "MERCE ARRIVATA (Svuota Lista)"}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
 }
 
 // --- ITEM CARD ---
@@ -483,7 +661,6 @@ function ItemCard({ item, onUpdate, onDetails, isExpiringSoon }) {
         )}
       </div>
       
-      {/* Footer Azioni (Disabilitato se archiviato) */}
       {!item.isArchived && (
           <div className="flex flex-col bg-slate-50 border-t">
              {allowDecimals && (
@@ -587,7 +764,7 @@ function AddModal({ onClose, onSave, isCook, isBarista, initialData, nameSuggest
   );
 }
 
-function DetailModal({ item, onClose, onDelete, onEdit, onToggleArchive, isAdmin }) {
+function DetailModal({ item, onClose, onDelete, onEdit, onToggleArchive, onUpdate, isAdmin }) {
   const isPiatti = item?.category === CATEGORIES.PIATTI;
   const isLow = !isPiatti && (item?.quantity || 0) <= (item?.minThreshold || 0);
   const meta = CATEGORIES_META[item?.category] || CATEGORIES_META[CATEGORIES.ALTRO];
@@ -618,9 +795,15 @@ function DetailModal({ item, onClose, onDelete, onEdit, onToggleArchive, isAdmin
             </div>
           )}
           {isPiatti && !item.isArchived && (
-              <div className="mt-6 p-6 rounded-[2rem] border-4 bg-slate-50 border-slate-200 text-center">
-                  <p className="text-slate-500 font-bold italic">Prodotto "A Flusso"</p>
-                  <p className="text-xs text-slate-400">La quantità non viene tracciata, solo le vendite.</p>
+              <div className="mt-6 p-6 rounded-[2rem] border-4 bg-slate-50 border-slate-200 text-center flex flex-col items-center justify-center gap-3">
+                  <div>
+                    <p className="text-slate-500 font-bold italic">Prodotto "A Flusso"</p>
+                    <p className="text-xs text-slate-400">La quantità non viene tracciata, solo le vendite.</p>
+                  </div>
+                  {/* TASTO ANNULLA ERRORE PER PIATTI */}
+                  <button onClick={() => { onUpdate(item.id, 1); onClose(); }} className="px-4 py-2 bg-red-50 text-red-600 rounded-xl font-black text-[10px] uppercase border border-red-100 hover:bg-red-100 flex items-center gap-2">
+                      <Icon name="undo-2" size={14} /> Annulla Errore (+1)
+                  </button>
               </div>
           )}
           {item.isArchived && (
@@ -637,7 +820,6 @@ function DetailModal({ item, onClose, onDelete, onEdit, onToggleArchive, isAdmin
           {item?.expiryDate && <div className="p-5 rounded-2xl border-2 bg-orange-50 border-orange-200 text-orange-900"><p className="text-[10px] font-black uppercase mb-1 flex items-center gap-2"><Icon name="calendar" size={14} /> Scadenza</p><p className="text-xl font-black uppercase">{new Date(item.expiryDate).toLocaleDateString('it-IT')}</p></div>}
           
           <div className="flex gap-3 pt-4 flex-col">
-            {/* TASTO ARCHIVIA / RIPRISTINA (Solo Piatti per ora o tutti se admin vuole) */}
             {isAdmin && item.category === CATEGORIES.PIATTI && (
                 <button 
                     onClick={onToggleArchive} 
@@ -663,6 +845,7 @@ function StatsModal({ onClose, items }) {
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [reportData, setReportData] = useState([]);
+  const [chartData, setChartData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [reportSearchQuery, setReportSearchQuery] = useState('');
 
@@ -676,7 +859,13 @@ function StatsModal({ onClose, items }) {
       const start = new Date(startDate); start.setHours(0,0,0,0);
       const end = new Date(endDate); end.setHours(23,59,59,999);
 
+      const diffTime = Math.abs(end - start);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+      const isMonthlyMode = diffDays > 60; 
+
       const grouped = {};
+      const chartGrouped = {}; 
+
       snapshot.docs.forEach(doc => {
         const log = doc.data();
         const logDate = new Date(log.date);
@@ -690,20 +879,62 @@ function StatsModal({ onClose, items }) {
           } else {
             grouped[log.itemName].sold += Math.abs(log.quantityChange);
           }
+
+          const matchesQuery = reportSearchQuery ? log.itemName.toLowerCase().includes(reportSearchQuery.toLowerCase()) : true;
+
+          if (log.quantityChange < 0 && matchesQuery) { 
+              let key;
+              if (isMonthlyMode) {
+                  key = logDate.toISOString().slice(0, 7); 
+              } else {
+                  key = logDate.toISOString().slice(0, 10); 
+              }
+
+              if (!chartGrouped[key]) chartGrouped[key] = 0;
+              chartGrouped[key] += Math.abs(log.quantityChange);
+          }
         }
       });
+
       const finalReport = Object.values(grouped).map(i => ({
          ...i,
          loaded: parseFloat(i.loaded.toFixed(2)),
          sold: parseFloat(i.sold.toFixed(2))
       })).sort((a,b) => b.sold - a.sold);
-
       setReportData(finalReport);
+
+      const chartArray = Object.keys(chartGrouped).map(key => {
+          let label = key;
+          if (isMonthlyMode) {
+              const [y, m] = key.split('-');
+              const dateObj = new Date(parseInt(y), parseInt(m)-1, 1);
+              label = dateObj.toLocaleDateString('it-IT', { month: 'short', year: '2-digit' }); 
+          } else {
+              const [y, m, d] = key.split('-');
+              label = `${d}/${m}`; 
+          }
+
+          return {
+              sortKey: key, 
+              date: label,  
+              vendite: parseFloat(chartGrouped[key].toFixed(2))
+          };
+      });
+      
+      chartArray.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+
+      setChartData(chartArray);
+
     } catch (err) {
       alert("Errore generazione report: " + err.message);
     }
     setLoading(false);
   };
+
+  useEffect(() => {
+      if (reportData.length > 0) generateReport();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportSearchQuery]);
 
   const filteredReportData = useMemo(() => {
     if (!reportSearchQuery) return reportData;
@@ -715,7 +946,7 @@ function StatsModal({ onClose, items }) {
   return (
     <div className="fixed inset-0 z-[500] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={onClose}></div>
-      <div className="relative bg-white w-full max-w-2xl rounded-[2.5rem] overflow-hidden shadow-2xl animate-modal flex flex-col max-h-[90vh]">
+      <div className="relative bg-white w-full max-w-4xl rounded-[2.5rem] overflow-hidden shadow-2xl animate-modal flex flex-col max-h-[95vh]">
         <div className="p-8 border-b bg-slate-900 text-white flex justify-between items-center">
           <div>
              <h2 className="text-2xl font-black uppercase italic tracking-tighter text-yellow-400">Report Vendite</h2>
@@ -743,13 +974,37 @@ function StatsModal({ onClose, items }) {
                 <Icon name="search" size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input 
                     type="text" 
-                    placeholder="Cerca prodotto specifico nel report..." 
+                    placeholder="Cerca prodotto per filtrare grafico e tabella..." 
                     value={reportSearchQuery}
                     onChange={(e) => setReportSearchQuery(e.target.value)}
                     className="w-full p-3 pl-10 bg-white border-2 border-slate-200 rounded-xl font-bold text-slate-700 focus:border-blue-600 outline-none transition-colors placeholder:font-medium"
                 />
             </div>
         </div>
+
+        {chartData.length > 0 && (
+            <div className="h-64 w-full bg-white p-4 border-b border-slate-100">
+                <p className="text-[10px] font-black uppercase text-slate-400 mb-2 text-center">
+                    Andamento Vendite {reportSearchQuery ? `"${reportSearchQuery}"` : "Totali"}
+                </p>
+                <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chartData}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                        <XAxis dataKey="date" tick={{fontSize: 10, fill: '#64748b'}} axisLine={false} tickLine={false} />
+                        <YAxis tick={{fontSize: 10, fill: '#64748b'}} axisLine={false} tickLine={false} />
+                        <Tooltip 
+                            contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'}}
+                            cursor={{fill: '#f1f5f9'}}
+                        />
+                        <Bar dataKey="vendite" fill="#0f172a" radius={[4, 4, 0, 0]}>
+                             {chartData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.vendite > 10 ? '#2563eb' : '#0f172a'} />
+                             ))}
+                        </Bar>
+                    </BarChart>
+                </ResponsiveContainer>
+            </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-6 space-y-2">
             {reportData.length === 0 ? (
