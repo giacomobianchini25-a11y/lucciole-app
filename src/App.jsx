@@ -31,7 +31,7 @@ import {
   Clock, Power, Search, Plus, X, Truck, Calendar, Trash2, Pencil, Tag, 
   BarChart3, ArrowDownCircle, ArrowUpCircle, CookingPot, CheckCircle2,
   Archive, RefreshCw, ArchiveRestore, ClipboardList, Save, CheckSquare,
-  Undo2, Calculator, Wallet
+  Undo2, Calculator, Wallet, GlassWater // Icona per il bicchiere
 } from 'lucide-react';
 
 // --- MAPPA ICONE ---
@@ -44,7 +44,7 @@ const ICON_MAP = {
   'cooking-pot': CookingPot, 'check-circle': CheckCircle2,
   'archive': Archive, 'refresh-cw': RefreshCw, 'archive-restore': ArchiveRestore,
   'clipboard-list': ClipboardList, 'save': Save, 'check-square': CheckSquare,
-  'undo-2': Undo2, 'calculator': Calculator, 'wallet': Wallet
+  'undo-2': Undo2, 'calculator': Calculator, 'wallet': Wallet, 'glass-water': GlassWater
 };
 
 const Icon = ({ name, size = 20, className = "", strokeWidth = 2.5 }) => {
@@ -62,7 +62,7 @@ const CATEGORIES = {
   ALTRO: 'Altro'
 };
 
-const UNITS = ['Pz', 'Kg', 'Lt', 'Pacchi', 'Porzioni'];
+const UNITS = ['Pz', 'Kg', 'Lt', 'Pacchi', 'Porzioni', 'Bottiglie'];
 
 const CATEGORIES_META = {
   [CATEGORIES.BAR]: { icon: 'wine', color: 'bg-blue-700', text: 'text-blue-900', border: 'border-blue-300' },
@@ -117,13 +117,14 @@ const Autocomplete = ({ value, onChange, suggestions, placeholder, className, la
 };
 
 // --- LOGGING ---
-const logTransaction = async (itemName, category, quantityChange, userRole) => {
+const logTransaction = async (itemName, category, quantityChange, userRole, note = '') => {
   try {
     await addDoc(collection(db, 'logs'), {
       itemName,
       category,
       quantityChange,
       userRole,
+      note, // Aggiunto note per specificare se è un "Bicchiere" o "Bottiglia"
       date: new Date().toISOString()
     });
   } catch (e) {
@@ -217,7 +218,9 @@ export default function App() {
           unit: formData.unit,
           expiryDate: formData.expiryDate,
           costPrice: formData.costPrice,
-          sellPrice: formData.sellPrice
+          sellPrice: formData.sellPrice,
+          capacity: formData.capacity, // NUOVO: Capacità Totale (es. 700ml)
+          dose: formData.dose          // NUOVO: Dose Singola (es. 40ml)
         });
         await logTransaction(formData.name, formData.category, 0, userRole + " (Edit)");
       } else {
@@ -234,7 +237,9 @@ export default function App() {
             supplier: formData.supplier || existing.supplier || "",
             subcategory: formData.subcategory || existing.subcategory || "",
             costPrice: formData.costPrice || existing.costPrice || 0,
-            sellPrice: formData.sellPrice || existing.sellPrice || 0
+            sellPrice: formData.sellPrice || existing.sellPrice || 0,
+            capacity: formData.capacity || existing.capacity || 0,
+            dose: formData.dose || existing.dose || 0
           });
           await logTransaction(existing.name, existing.category, formData.quantity, userRole);
         } else {
@@ -249,22 +254,24 @@ export default function App() {
     }
   };
 
-  const updateQty = async (id, delta) => {
+  // --- FUNZIONE UPDATE QTY AGGIORNATA PER SUPPORTARE LE DOSI ---
+  const updateQty = async (id, delta, note = '') => {
     const item = items.find(i => i.id === id);
     if (!item) return;
 
     if (item.category === CATEGORIES.PIATTI) {
-        await logTransaction(item.name, item.category, delta, userRole);
+        await logTransaction(item.name, item.category, delta, userRole, note);
         return; 
     }
 
     try {
-      const newQty = Math.max(0, parseFloat((item.quantity + delta).toFixed(2)));
+      // Calcola nuova quantità gestendo i decimali con precisione
+      const newQty = Math.max(0, parseFloat((item.quantity + delta).toFixed(4))); 
       
       await updateDoc(doc(db, 'inventory', id), {
         quantity: newQty
       });
-      await logTransaction(item.name, item.category, delta, userRole);
+      await logTransaction(item.name, item.category, delta, userRole, note);
     } catch (err) { console.error(err); }
   };
 
@@ -345,300 +352,308 @@ export default function App() {
     </div>
   );
 
-  return (
-    <div className="min-h-screen pb-44">
-      <header className={`p-8 flex justify-between items-center shadow-xl transition-colors ${showArchived ? 'bg-slate-800 border-b-4 border-yellow-500' : 'bg-slate-900 text-white'}`}>
-        <div>
-          <h1 className="text-3xl font-black uppercase italic tracking-tighter text-yellow-400 leading-none">Lucciole</h1>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
-              {showArchived ? "ARCHIVIO OBSOLETI" : "Magazzino"}
-          </p>
-        </div>
-        <div className="flex gap-2">
-            {isManager && (
-                <button 
-                    onClick={() => {
-                        setShowArchived(!showArchived);
-                        setActiveCategory('TUTTI');
-                    }} 
-                    className={`p-3 rounded-full transition-all ${showArchived ? 'bg-yellow-400 text-black shadow-[0_0_15px_rgba(250,204,21,0.5)]' : 'bg-white/10 text-slate-400 hover:text-white'}`}
-                >
-                    <Icon name={showArchived ? "archive-restore" : "archive"} size={20} />
-                </button>
-            )}
-
-            {isSuperAdmin && (
-                <button onClick={() => setIsStatsOpen(true)} className="bg-white/10 text-yellow-400 p-3 rounded-full hover:bg-white/20 transition-all">
-                    <Icon name="bar-chart" size={20} />
-                </button>
-            )}
-            
-            <button onClick={handleLogout} className="bg-red-50 text-red-600 px-4 py-2 rounded-full border border-red-100 hover:bg-red-100 font-black text-[10px] uppercase tracking-widest transition-all shadow-md active:scale-95">
-            Esci
-            </button>
-        </div>
-      </header>
-      
-      {!isCook && !isBarista && !showArchived && (
-        <div className="sticky top-0 z-[150] space-y-0.5">
-          {lowStockCount > 0 && (
-            <button onClick={() => setFilterMode(prev => prev === 'LOW_STOCK' ? 'ALL' : 'LOW_STOCK')} className={`w-full p-4 flex items-center justify-center gap-3 font-black text-[10px] uppercase tracking-widest transition-all ${filterMode === 'LOW_STOCK' ? 'bg-black text-white' : 'bg-red-700 text-white shadow-xl'}`}>
-              <Icon name="alert-triangle" size={14} /> {filterMode === 'LOW_STOCK' ? 'Filtro Scorte Attivo' : `${lowStockCount} Sotto Scorta`}
-            </button>
-          )}
-          {expiringCount > 0 && (
-            <button onClick={() => setFilterMode(prev => prev === 'EXPIRING' ? 'ALL' : 'EXPIRING')} className={`w-full p-4 flex items-center justify-center gap-3 font-black text-[10px] uppercase tracking-widest transition-all ${filterMode === 'EXPIRING' ? 'bg-black text-white' : 'bg-orange-600 text-white shadow-xl'}`}>
-              <Icon name="clock" size={14} /> {filterMode === 'EXPIRING' ? 'Filtro Scadenze Attivo' : `${expiringCount} In Scadenza`}
-            </button>
-          )}
-        </div>
-      )}
-
-      <main className="max-w-4xl mx-auto p-6 space-y-8">
-        {showArchived && (
-            <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 p-4 rounded-xl mb-4 text-sm font-bold">
-                ⚠️ Stai visualizzando i prodotti obsoleti. Clicca su un prodotto per ripristinarlo nel menu attivo.
-            </div>
-        )}
-
-        <div className="relative group">
-          <Icon name="search" size={24} className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 z-50 group-focus-within:text-slate-900" />
-          <Autocomplete 
-            value={searchQuery} onChange={setSearchQuery} 
-            suggestions={[...new Set(items.map(i => i.name || ""))]} 
-            placeholder={showArchived ? "Cerca nell'archivio..." : "Cerca..."} 
-            className="w-full bg-white border-4 border-slate-200 rounded-[2rem] p-6 pl-14 text-xl font-black focus:border-slate-900 outline-none shadow-hard" 
-          />
-        </div>
-
-        {!isCook && !isBarista && (
-          <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2">
-            <button onClick={() => {setActiveCategory('TUTTI'); setFilterMode('ALL');}} className={`flex-shrink-0 px-6 py-4 rounded-[1.5rem] font-black text-[11px] uppercase transition-all ${activeCategory === 'TUTTI' && filterMode === 'ALL' ? 'bg-slate-900 text-white shadow-lg scale-105' : 'bg-white text-slate-400 border-2 border-slate-100'}`}>TUTTI</button>
-            {Object.values(CATEGORIES).map(cat => (
-              <button key={cat} onClick={() => {setActiveCategory(cat); setFilterMode('ALL');}} className={`flex-shrink-0 px-6 py-4 rounded-[1.5rem] font-black text-[11px] uppercase flex items-center gap-2 transition-all ${activeCategory === cat ? `${CATEGORIES_META[cat].color} text-white shadow-lg scale-105` : 'bg-white text-slate-400 border-2 border-slate-100'}`}>
-                <Icon name={CATEGORIES_META[cat].icon} size={16} /> {cat.split(' ')[0]}
+// --- FINE PARTE 1 ---
+return (
+  <div className="min-h-screen pb-44">
+    <header className={`p-8 flex justify-between items-center shadow-xl transition-colors ${showArchived ? 'bg-slate-800 border-b-4 border-yellow-500' : 'bg-slate-900 text-white'}`}>
+      <div>
+        <h1 className="text-3xl font-black uppercase italic tracking-tighter text-yellow-400 leading-none">Lucciole</h1>
+        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+            {showArchived ? "ARCHIVIO OBSOLETI" : "Magazzino"}
+        </p>
+      </div>
+      <div className="flex gap-2">
+          {isManager && (
+              <button 
+                  onClick={() => {
+                      setShowArchived(!showArchived);
+                      setActiveCategory('TUTTI');
+                  }} 
+                  className={`p-3 rounded-full transition-all ${showArchived ? 'bg-yellow-400 text-black shadow-[0_0_15px_rgba(250,204,21,0.5)]' : 'bg-white/10 text-slate-400 hover:text-white'}`}
+              >
+                  <Icon name={showArchived ? "archive-restore" : "archive"} size={20} />
               </button>
-            ))}
-          </div>
-        )}
+          )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
-          {filteredItems.map(item => (
-            <ItemCard key={item.id} item={item} onUpdate={updateQty} onDetails={() => setSelectedItem(item)} isExpiringSoon={checkExpiring(item.expiryDate)} />
-          ))}
-        </div>
-      </main>
-
-      <div className="fixed bottom-8 left-1/2 -translate-x-1/2 w-11/12 max-w-sm flex gap-3 z-[200]">
-          {!showArchived && (
-            <button onClick={openNewItemModal} className="flex-1 bg-blue-600 text-white px-6 py-4 rounded-full shadow-[0_4px_14px_0_rgba(0,118,255,0.39)] flex items-center justify-center gap-3 active:scale-95 hover:bg-blue-700 hover:-translate-y-1 transition-all font-black uppercase tracking-widest text-sm">
-                <Icon name="plus" size={24} strokeWidth={3} /> Aggiungi
-            </button>
+          {isSuperAdmin && (
+              <button onClick={() => setIsStatsOpen(true)} className="bg-white/10 text-yellow-400 p-3 rounded-full hover:bg-white/20 transition-all">
+                  <Icon name="bar-chart" size={20} />
+              </button>
           )}
           
-          <button onClick={() => setIsShoppingListOpen(true)} className="w-16 bg-white text-slate-900 border-4 border-slate-200 rounded-full shadow-lg flex items-center justify-center active:scale-95 hover:bg-slate-50 transition-all">
-              <Icon name="clipboard-list" size={24} strokeWidth={2.5} />
+          <button onClick={handleLogout} className="bg-red-50 text-red-600 px-4 py-2 rounded-full border border-red-100 hover:bg-red-100 font-black text-[10px] uppercase tracking-widest transition-all shadow-md active:scale-95">
+          Esci
           </button>
       </div>
+    </header>
+    
+    {!isCook && !isBarista && !showArchived && (
+      <div className="sticky top-0 z-[150] space-y-0.5">
+        {lowStockCount > 0 && (
+          <button onClick={() => setFilterMode(prev => prev === 'LOW_STOCK' ? 'ALL' : 'LOW_STOCK')} className={`w-full p-4 flex items-center justify-center gap-3 font-black text-[10px] uppercase tracking-widest transition-all ${filterMode === 'LOW_STOCK' ? 'bg-black text-white' : 'bg-red-700 text-white shadow-xl'}`}>
+            <Icon name="alert-triangle" size={14} /> {filterMode === 'LOW_STOCK' ? 'Filtro Scorte Attivo' : `${lowStockCount} Sotto Scorta`}
+          </button>
+        )}
+        {expiringCount > 0 && (
+          <button onClick={() => setFilterMode(prev => prev === 'EXPIRING' ? 'ALL' : 'EXPIRING')} className={`w-full p-4 flex items-center justify-center gap-3 font-black text-[10px] uppercase tracking-widest transition-all ${filterMode === 'EXPIRING' ? 'bg-black text-white' : 'bg-orange-600 text-white shadow-xl'}`}>
+            <Icon name="clock" size={14} /> {filterMode === 'EXPIRING' ? 'Filtro Scadenze Attivo' : `${expiringCount} In Scadenza`}
+          </button>
+        )}
+      </div>
+    )}
 
-      {isAddModalOpen && (
-        <AddModal 
-          onClose={() => setIsAddModalOpen(false)} 
-          onSave={handleSaveItem} 
-          isCook={isCook} 
-          isBarista={isBarista} 
-          isManager={isManager} 
-          initialData={itemToEdit}
-          nameSuggestions={[...new Set(items.map(i => i.name || ""))]} 
-          supplierSuggestions={[...new Set(items.filter(i => i.supplier).map(i => i.supplier || ""))]} 
-          subcategorySuggestions={[...new Set(items.filter(i => i.subcategory).map(i => i.subcategory || ""))]} 
+    <main className="max-w-4xl mx-auto p-6 space-y-8">
+      {showArchived && (
+          <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 p-4 rounded-xl mb-4 text-sm font-bold">
+              ⚠️ Stai visualizzando i prodotti obsoleti. Clicca su un prodotto per ripristinarlo nel menu attivo.
+          </div>
+      )}
+
+      <div className="relative group">
+        <Icon name="search" size={24} className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 z-50 group-focus-within:text-slate-900" />
+        <Autocomplete 
+          value={searchQuery} onChange={setSearchQuery} 
+          suggestions={[...new Set(items.map(i => i.name || ""))]} 
+          placeholder={showArchived ? "Cerca nell'archivio..." : "Cerca..."} 
+          className="w-full bg-white border-4 border-slate-200 rounded-[2rem] p-6 pl-14 text-xl font-black focus:border-slate-900 outline-none shadow-hard" 
         />
-      )}
-      
-      {selectedItem && (
-        <DetailModal 
-          item={selectedItem} 
-          onClose={() => setSelectedItem(null)} 
-          isManager={isManager} 
-          onEdit={() => openEditModal(selectedItem)}
-          onDelete={async (id) => { if(confirm("Eliminare?")) { await deleteDoc(doc(db, 'inventory', id)); setSelectedItem(null); } }} 
-          onToggleArchive={() => toggleArchiveItem(selectedItem.id, selectedItem.isArchived)}
-          onUpdate={updateQty}
-        />
+      </div>
+
+      {!isCook && !isBarista && (
+        <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2">
+          <button onClick={() => {setActiveCategory('TUTTI'); setFilterMode('ALL');}} className={`flex-shrink-0 px-6 py-4 rounded-[1.5rem] font-black text-[11px] uppercase transition-all ${activeCategory === 'TUTTI' && filterMode === 'ALL' ? 'bg-slate-900 text-white shadow-lg scale-105' : 'bg-white text-slate-400 border-2 border-slate-100'}`}>TUTTI</button>
+          {Object.values(CATEGORIES).map(cat => (
+            <button key={cat} onClick={() => {setActiveCategory(cat); setFilterMode('ALL');}} className={`flex-shrink-0 px-6 py-4 rounded-[1.5rem] font-black text-[11px] uppercase flex items-center gap-2 transition-all ${activeCategory === cat ? `${CATEGORIES_META[cat].color} text-white shadow-lg scale-105` : 'bg-white text-slate-400 border-2 border-slate-100'}`}>
+              <Icon name={CATEGORIES_META[cat].icon} size={16} /> {cat.split(' ')[0]}
+            </button>
+          ))}
+        </div>
       )}
 
-      {isStatsOpen && isSuperAdmin && (
-          <StatsModal onClose={() => setIsStatsOpen(false)} items={items} />
-      )}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
+        {filteredItems.map(item => (
+          <ItemCard key={item.id} item={item} onUpdate={updateQty} onDetails={() => setSelectedItem(item)} isExpiringSoon={checkExpiring(item.expiryDate)} />
+        ))}
+      </div>
+    </main>
 
-      {isShoppingListOpen && (
-          <ShoppingListModal 
-            onClose={() => setIsShoppingListOpen(false)} 
-            isCook={isCook}
-            isBarista={isBarista}
-            isManager={isManager}
-          />
-      )}
+    <div className="fixed bottom-8 left-1/2 -translate-x-1/2 w-11/12 max-w-sm flex gap-3 z-[200]">
+        {!showArchived && (
+          <button onClick={openNewItemModal} className="flex-1 bg-blue-600 text-white px-6 py-4 rounded-full shadow-[0_4px_14px_0_rgba(0,118,255,0.39)] flex items-center justify-center gap-3 active:scale-95 hover:bg-blue-700 hover:-translate-y-1 transition-all font-black uppercase tracking-widest text-sm">
+              <Icon name="plus" size={24} strokeWidth={3} /> Aggiungi
+          </button>
+        )}
+        
+        <button onClick={() => setIsShoppingListOpen(true)} className="w-16 bg-white text-slate-900 border-4 border-slate-200 rounded-full shadow-lg flex items-center justify-center active:scale-95 hover:bg-slate-50 transition-all">
+            <Icon name="clipboard-list" size={24} strokeWidth={2.5} />
+        </button>
     </div>
-  );
+
+    {isAddModalOpen && (
+      <AddModal 
+        onClose={() => setIsAddModalOpen(false)} 
+        onSave={handleSaveItem} 
+        isCook={isCook} 
+        isBarista={isBarista} 
+        isManager={isManager} 
+        initialData={itemToEdit}
+        nameSuggestions={[...new Set(items.map(i => i.name || ""))]} 
+        supplierSuggestions={[...new Set(items.filter(i => i.supplier).map(i => i.supplier || ""))]} 
+        subcategorySuggestions={[...new Set(items.filter(i => i.subcategory).map(i => i.subcategory || ""))]} 
+      />
+    )}
+    
+    {selectedItem && (
+      <DetailModal 
+        item={selectedItem} 
+        onClose={() => setSelectedItem(null)} 
+        isManager={isManager} 
+        onEdit={() => openEditModal(selectedItem)}
+        onDelete={async (id) => { if(confirm("Eliminare?")) { await deleteDoc(doc(db, 'inventory', id)); setSelectedItem(null); } }} 
+        onToggleArchive={() => toggleArchiveItem(selectedItem.id, selectedItem.isArchived)}
+        onUpdate={updateQty}
+      />
+    )}
+
+    {isStatsOpen && isSuperAdmin && (
+        <StatsModal onClose={() => setIsStatsOpen(false)} items={items} />
+    )}
+
+    {isShoppingListOpen && (
+        <ShoppingListModal 
+          onClose={() => setIsShoppingListOpen(false)} 
+          isCook={isCook}
+          isBarista={isBarista}
+          isManager={isManager}
+        />
+    )}
+  </div>
+);
 }
 
 // --- MODALE LISTA SPESA (LAVAGNA COMPLETA CON PERMESSI) ---
 function ShoppingListModal({ onClose, isCook, isBarista, isManager }) {
-    const visibleTabs = useMemo(() => {
-        if (isCook) return SHOPPING_TABS.filter(t => t.id === 'ristorante');
-        if (isBarista) return SHOPPING_TABS.filter(t => t.id === 'bar');
-        return SHOPPING_TABS; 
-    }, [isCook, isBarista]);
+  const visibleTabs = useMemo(() => {
+      if (isCook) return SHOPPING_TABS.filter(t => t.id === 'ristorante');
+      if (isBarista) return SHOPPING_TABS.filter(t => t.id === 'bar');
+      return SHOPPING_TABS; 
+  }, [isCook, isBarista]);
 
-    const [activeTab, setActiveTab] = useState(() => {
-        if (isCook) return 'ristorante';
-        if (isBarista) return 'bar';
-        return 'ALL';
-    });
+  const [activeTab, setActiveTab] = useState(() => {
+      if (isCook) return 'ristorante';
+      if (isBarista) return 'bar';
+      return 'ALL';
+  });
 
-    const [notes, setNotes] = useState({
-        bar: '',
-        ristorante: '',
-        lavanderia: '',
-        piscina: '',
-        altro: ''
-    });
-    const [saving, setSaving] = useState(false);
+  const [notes, setNotes] = useState({
+      bar: '',
+      ristorante: '',
+      lavanderia: '',
+      piscina: '',
+      altro: ''
+  });
+  const [saving, setSaving] = useState(false);
 
-    useEffect(() => {
-        const fetchNote = async () => {
-            const docRef = doc(db, 'general', 'shoppingList');
-            const docSnap = await getDoc(docRef);
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                setNotes({
-                    bar: data.contentBar || '',
-                    ristorante: data.contentRistorante !== undefined ? data.contentRistorante : (data.contentKitchen || ''),
-                    lavanderia: data.contentLavanderia !== undefined ? data.contentLavanderia : (data.contentBiancheria || ''), 
-                    piscina: data.contentPiscina || '',
-                    altro: data.contentAltro || ''
-                });
-            }
-        };
-        fetchNote();
-    }, []);
+  useEffect(() => {
+      const fetchNote = async () => {
+          const docRef = doc(db, 'general', 'shoppingList');
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+              const data = docSnap.data();
+              setNotes({
+                  bar: data.contentBar || '',
+                  ristorante: data.contentRistorante !== undefined ? data.contentRistorante : (data.contentKitchen || ''),
+                  lavanderia: data.contentLavanderia !== undefined ? data.contentLavanderia : (data.contentBiancheria || ''), 
+                  piscina: data.contentPiscina || '',
+                  altro: data.contentAltro || ''
+              });
+          }
+      };
+      fetchNote();
+  }, []);
 
-    const saveNotes = async (updatedNotes = notes) => {
-        setSaving(true);
-        try {
-            await setDoc(doc(db, 'general', 'shoppingList'), {
-                contentBar: updatedNotes.bar,
-                contentRistorante: updatedNotes.ristorante,
-                contentLavanderia: updatedNotes.lavanderia,
-                contentPiscina: updatedNotes.piscina,
-                contentAltro: updatedNotes.altro,
-                updatedAt: new Date().toISOString()
-            }, { merge: true });
-        } catch (e) {
-            alert("Errore salvataggio: " + e.message);
-        }
-        setSaving(false);
-    };
+  const saveNotes = async (updatedNotes = notes) => {
+      setSaving(true);
+      try {
+          await setDoc(doc(db, 'general', 'shoppingList'), {
+              contentBar: updatedNotes.bar,
+              contentRistorante: updatedNotes.ristorante,
+              contentLavanderia: updatedNotes.lavanderia,
+              contentPiscina: updatedNotes.piscina,
+              contentAltro: updatedNotes.altro,
+              updatedAt: new Date().toISOString()
+          }, { merge: true });
+      } catch (e) {
+          alert("Errore salvataggio: " + e.message);
+      }
+      setSaving(false);
+  };
 
-    const handleClearCurrent = async () => {
-        if (activeTab === 'ALL') {
-            if(confirm("ATTENZIONE: Stai per svuotare TUTTE le liste spesa di tutti i reparti. Confermi che è arrivata tutta la merce?")) {
-                const emptyNotes = { bar: '', ristorante: '', lavanderia: '', piscina: '', altro: '' };
-                setNotes(emptyNotes);
-                await saveNotes(emptyNotes);
-            }
-        } else {
-            if(confirm(`Svuotare la lista ${SHOPPING_TABS.find(t => t.id === activeTab)?.label}?`)) {
-                const newNotes = { ...notes, [activeTab]: '' };
-                setNotes(newNotes);
-                await saveNotes(newNotes);
-            }
-        }
-    };
+  const handleClearCurrent = async () => {
+      if (activeTab === 'ALL') {
+          if(confirm("ATTENZIONE: Stai per svuotare TUTTE le liste spesa di tutti i reparti. Confermi che è arrivata tutta la merce?")) {
+              const emptyNotes = { bar: '', ristorante: '', lavanderia: '', piscina: '', altro: '' };
+              setNotes(emptyNotes);
+              await saveNotes(emptyNotes);
+          }
+      } else {
+          if(confirm(`Svuotare la lista ${SHOPPING_TABS.find(t => t.id === activeTab)?.label}?`)) {
+              const newNotes = { ...notes, [activeTab]: '' };
+              setNotes(newNotes);
+              await saveNotes(newNotes);
+          }
+      }
+  };
 
-    const handleNoteChange = (text) => {
-        setNotes(prev => ({ ...prev, [activeTab]: text }));
-    };
+  const handleNoteChange = (text) => {
+      setNotes(prev => ({ ...prev, [activeTab]: text }));
+  };
 
-    return (
-        <div className="fixed inset-0 z-[500] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}></div>
-            <div className="relative bg-white w-full max-w-2xl rounded-[2.5rem] overflow-hidden shadow-2xl animate-modal flex flex-col h-[90vh]">
-                <div className="p-3 bg-slate-100 flex gap-2 overflow-x-auto no-scrollbar items-center border-b border-slate-200">
-                    <button onClick={onClose} className="flex-shrink-0 w-12 h-12 flex items-center justify-center text-slate-400 hover:text-red-500 transition-colors bg-white rounded-2xl mr-1">
-                        <Icon name="x" size={24} />
-                    </button>
-                    {visibleTabs.map(tab => (
-                        <button 
-                            key={tab.id}
-                            onClick={() => setActiveTab(tab.id)} 
-                            className={`flex-shrink-0 px-5 py-3 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center gap-2 transition-all ${activeTab === tab.id ? `${tab.color} text-white shadow-md scale-105` : 'bg-white text-slate-400 border border-slate-200 hover:bg-slate-50'}`}
-                        >
-                            <Icon name={tab.icon} size={16} /> {tab.label}
-                        </button>
-                    ))}
-                </div>
+  return (
+      <div className="fixed inset-0 z-[500] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}></div>
+          <div className="relative bg-white w-full max-w-2xl rounded-[2.5rem] overflow-hidden shadow-2xl animate-modal flex flex-col h-[90vh]">
+              <div className="p-3 bg-slate-100 flex gap-2 overflow-x-auto no-scrollbar items-center border-b border-slate-200">
+                  <button onClick={onClose} className="flex-shrink-0 w-12 h-12 flex items-center justify-center text-slate-400 hover:text-red-500 transition-colors bg-white rounded-2xl mr-1">
+                      <Icon name="x" size={24} />
+                  </button>
+                  {visibleTabs.map(tab => (
+                      <button 
+                          key={tab.id}
+                          onClick={() => setActiveTab(tab.id)} 
+                          className={`flex-shrink-0 px-5 py-3 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center gap-2 transition-all ${activeTab === tab.id ? `${tab.color} text-white shadow-md scale-105` : 'bg-white text-slate-400 border border-slate-200 hover:bg-slate-50'}`}
+                      >
+                          <Icon name={tab.icon} size={16} /> {tab.label}
+                      </button>
+                  ))}
+              </div>
 
-                <div className="flex-1 p-0 bg-white relative overflow-y-auto">
-                    {activeTab === 'ALL' ? (
-                        <div className="p-6 space-y-8">
-                            <h3 className="text-2xl font-black text-slate-900 uppercase italic tracking-tighter mb-4 flex items-center gap-2">
-                                <Icon name="clipboard-list" size={28} /> Riepilogo Ordini
-                            </h3>
-                            {SHOPPING_TABS.filter(t => t.id !== 'ALL').map(tab => {
-                                const content = notes[tab.id];
-                                if (!content || !content.trim()) return null;
-                                return (
-                                    <div key={tab.id} className="border-l-4 border-slate-200 pl-4 py-1">
-                                        <h4 className={`font-black uppercase text-sm ${tab.color.replace('bg-', 'text-')} mb-2 flex items-center gap-2`}>
-                                            <Icon name={tab.icon} size={16} /> {tab.label}
-                                        </h4>
-                                        <pre className="whitespace-pre-wrap font-medium text-slate-600 text-lg leading-relaxed font-sans">
-                                            {content}
-                                        </pre>
-                                    </div>
-                                );
-                            })}
-                            {Object.values(notes).every(v => !v.trim()) && (
-                                <div className="text-center text-slate-300 font-bold py-10 italic">
-                                    Nessuna merce da ordinare al momento.
-                                </div>
-                            )}
-                        </div>
-                    ) : (
-                        <textarea 
-                            className="w-full h-full p-6 text-xl font-medium text-slate-700 placeholder:text-slate-300 outline-none resize-none"
-                            placeholder={`Scrivi qui la lista per ${SHOPPING_TABS.find(t => t.id === activeTab)?.label}...`}
-                            value={notes[activeTab] || ''}
-                            onChange={(e) => handleNoteChange(e.target.value)}
-                        ></textarea>
-                    )}
-                </div>
+              <div className="flex-1 p-0 bg-white relative overflow-y-auto">
+                  {activeTab === 'ALL' ? (
+                      <div className="p-6 space-y-8">
+                          <h3 className="text-2xl font-black text-slate-900 uppercase italic tracking-tighter mb-4 flex items-center gap-2">
+                              <Icon name="clipboard-list" size={28} /> Riepilogo Ordini
+                          </h3>
+                          {SHOPPING_TABS.filter(t => t.id !== 'ALL').map(tab => {
+                              const content = notes[tab.id];
+                              if (!content || !content.trim()) return null;
+                              return (
+                                  <div key={tab.id} className="border-l-4 border-slate-200 pl-4 py-1">
+                                      <h4 className={`font-black uppercase text-sm ${tab.color.replace('bg-', 'text-')} mb-2 flex items-center gap-2`}>
+                                          <Icon name={tab.icon} size={16} /> {tab.label}
+                                      </h4>
+                                      <pre className="whitespace-pre-wrap font-medium text-slate-600 text-lg leading-relaxed font-sans">
+                                          {content}
+                                      </pre>
+                                  </div>
+                              );
+                          })}
+                          {Object.values(notes).every(v => !v.trim()) && (
+                              <div className="text-center text-slate-300 font-bold py-10 italic">
+                                  Nessuna merce da ordinare al momento.
+                              </div>
+                          )}
+                      </div>
+                  ) : (
+                      <textarea 
+                          className="w-full h-full p-6 text-xl font-medium text-slate-700 placeholder:text-slate-300 outline-none resize-none"
+                          placeholder={`Scrivi qui la lista per ${SHOPPING_TABS.find(t => t.id === activeTab)?.label}...`}
+                          value={notes[activeTab] || ''}
+                          onChange={(e) => handleNoteChange(e.target.value)}
+                      ></textarea>
+                  )}
+              </div>
 
-                <div className="p-4 border-t bg-slate-50 flex flex-col gap-3">
-                    {activeTab !== 'ALL' && (
-                        <button onClick={() => saveNotes()} disabled={saving} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black text-xl hover:bg-black active:scale-95 transition-all flex items-center justify-center gap-2">
-                            <Icon name="save" size={20} /> {saving ? "Salvataggio..." : "Salva Modifiche"}
-                        </button>
-                    )}
-                    
-                    <button onClick={handleClearCurrent} className="w-full bg-green-100 text-green-700 border-2 border-green-200 py-3 rounded-2xl font-black text-sm hover:bg-green-200 active:scale-95 transition-all flex items-center justify-center gap-2">
-                        <Icon name="check-square" size={18} /> 
-                        {activeTab === 'ALL' ? "MERCE ARRIVATA (Svuota TUTTO)" : "MERCE ARRIVATA (Svuota Lista)"}
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
+              <div className="p-4 border-t bg-slate-50 flex flex-col gap-3">
+                  {activeTab !== 'ALL' && (
+                      <button onClick={() => saveNotes()} disabled={saving} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black text-xl hover:bg-black active:scale-95 transition-all flex items-center justify-center gap-2">
+                          <Icon name="save" size={20} /> {saving ? "Salvataggio..." : "Salva Modifiche"}
+                      </button>
+                  )}
+                  
+                  <button onClick={handleClearCurrent} className="w-full bg-green-100 text-green-700 border-2 border-green-200 py-3 rounded-2xl font-black text-sm hover:bg-green-200 active:scale-95 transition-all flex items-center justify-center gap-2">
+                      <Icon name="check-square" size={18} /> 
+                      {activeTab === 'ALL' ? "MERCE ARRIVATA (Svuota TUTTO)" : "MERCE ARRIVATA (Svuota Lista)"}
+                  </button>
+              </div>
+          </div>
+      </div>
+  );
 }
 
+// --- FINE PARTE 2 ---
 // --- ITEM CARD ---
 function ItemCard({ item, onUpdate, onDetails, isExpiringSoon }) {
   const isPiatti = item?.category === CATEGORIES.PIATTI;
   const isLow = !isPiatti && (item?.quantity || 0) <= (item?.minThreshold || 0);
   const meta = CATEGORIES_META[item?.category] || CATEGORIES_META[CATEGORIES.ALTRO];
-  const allowDecimals = !isPiatti && ['Kg', 'Lt'].includes(item?.unit);
+  
+  // Logica Dosi (Metodo Scientifico)
+  const hasDose = item?.category === CATEGORIES.BAR && item?.capacity > 0 && item?.dose > 0;
+  const doseFraction = hasDose ? (item.dose / item.capacity) : 0;
+  
+  // Se l'unità è bottiglia/pz ma vogliamo decimali, o se è Kg/Lt
+  const allowDecimals = !isPiatti && (['Kg', 'Lt'].includes(item?.unit) || hasDose);
 
   return (
     <div className={`relative bg-white rounded-[2.5rem] border-4 transition-all duration-300 overflow-hidden ${isLow && !item.isArchived ? 'border-red-600 bg-red-50/30' : (item.isArchived ? 'border-slate-300 opacity-75' : 'border-white hover:border-slate-200 shadow-xl')}`}>
@@ -652,6 +667,7 @@ function ItemCard({ item, onUpdate, onDetails, isExpiringSoon }) {
             {!item.isArchived && isExpiringSoon && <span className="bg-orange-600 text-white px-2 py-1 rounded-lg text-[8px] font-black uppercase">Exp Soon</span>}
           </div>
         </div>
+        
         <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none mb-1 text-slate-900 line-clamp-2">{item?.name || "Articolo"}</h3>
         <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-6 flex gap-2">
             <span>{item?.category || "Altro"}</span>
@@ -660,10 +676,27 @@ function ItemCard({ item, onUpdate, onDetails, isExpiringSoon }) {
         
         {!isPiatti && (
             <div className="flex items-baseline gap-2">
-            <span className={`text-6xl font-black tracking-tighter tabular-nums ${isLow && !item.isArchived ? 'text-red-700' : 'text-slate-900'}`}>{item?.quantity || 0}</span>
-            <span className="text-xl font-black text-slate-400 uppercase tracking-tighter">{item?.unit || ""}</span>
+                {/* Mostra fino a 2 decimali se ci sono dosi, altrimenti intero */}
+                <span className={`text-6xl font-black tracking-tighter tabular-nums ${isLow && !item.isArchived ? 'text-red-700' : 'text-slate-900'}`}>
+                    {parseFloat((item?.quantity || 0).toFixed(2))}
+                </span>
+                <span className="text-xl font-black text-slate-400 uppercase tracking-tighter">{item?.unit || ""}</span>
             </div>
         )}
+        
+        {/* Visualizzatore livello bottiglia aperta (grafico a barra) se gestiamo dosi */}
+        {hasDose && !item.isArchived && (
+            <div className="mt-2 flex items-center gap-2">
+                <div className="h-1.5 flex-1 bg-slate-100 rounded-full overflow-hidden">
+                    <div 
+                        className="h-full bg-blue-500 transition-all duration-500" 
+                        style={{ width: `${((item.quantity % 1) * 100).toFixed(0)}%` }}
+                    ></div>
+                </div>
+                <span className="text-[8px] font-black text-blue-400 uppercase">Aperta</span>
+            </div>
+        )}
+
         {isPiatti && (
             <div className="flex items-center gap-2 text-slate-300 mt-2">
                 <div className="h-2 w-full bg-slate-100 rounded-full"></div>
@@ -673,13 +706,20 @@ function ItemCard({ item, onUpdate, onDetails, isExpiringSoon }) {
       
       {!item.isArchived && (
           <div className="flex flex-col bg-slate-50 border-t">
-             {allowDecimals && (
-                 <div className="flex justify-center gap-4 pt-2">
-                     <button onClick={(e) => {e.stopPropagation(); onUpdate(item.id, -0.1)}} className="px-3 py-1 bg-white border border-slate-200 rounded-lg text-[10px] font-black text-slate-500 hover:bg-red-50 hover:text-red-600 active:scale-95 transition-all">- 0.1</button>
-                     <button onClick={(e) => {e.stopPropagation(); onUpdate(item.id, 0.1)}} className="px-3 py-1 bg-white border border-slate-200 rounded-lg text-[10px] font-black text-slate-500 hover:bg-green-50 hover:text-green-600 active:scale-95 transition-all">+ 0.1</button>
+             
+             {/* ZONA BAR - VENDITA A BICCHIERE */}
+             {hasDose && (
+                 <div className="p-2 pb-0">
+                     <button 
+                        onClick={(e) => {e.stopPropagation(); onUpdate(item.id, -doseFraction, 'Shot Venduto')}} 
+                        className="w-full py-3 bg-blue-100 text-blue-700 border-2 border-blue-200 rounded-2xl font-black text-xs hover:bg-blue-200 active:scale-95 transition-all flex items-center justify-center gap-2"
+                     >
+                         <Icon name="glass-water" size={16} /> VENDI BICCHIERE (-{item.dose}ml)
+                     </button>
                  </div>
              )}
-             
+
+             {/* TASTI STANDARD +/- (o Bottiglia intera) */}
              <div className="flex p-4 gap-4">
                 {isPiatti ? (
                     <button 
@@ -701,7 +741,7 @@ function ItemCard({ item, onUpdate, onDetails, isExpiringSoon }) {
                     </button>
                 ) : (
                     <>
-                        <button onClick={(e) => {e.stopPropagation(); onUpdate(item.id, -1)}} className="flex-1 bg-white border-2 border-slate-200 py-4 rounded-2xl font-black text-3xl hover:bg-slate-100 active:scale-95 transition-all">-</button>
+                        <button onClick={(e) => {e.stopPropagation(); onUpdate(item.id, -1)}} className="flex-1 bg-white border-2 border-slate-200 py-4 rounded-2xl font-black text-3xl hover:bg-slate-100 active:scale-95 transition-all text-slate-400 hover:text-red-500">-</button>
                         <button onClick={(e) => {e.stopPropagation(); onUpdate(item.id, 1)}} className="flex-1 bg-slate-900 text-white py-4 rounded-2xl font-black text-3xl hover:bg-black active:scale-95 transition-all">+</button>
                     </>
                 )}
@@ -712,7 +752,7 @@ function ItemCard({ item, onUpdate, onDetails, isExpiringSoon }) {
   );
 }
 
-// --- MODALE AGGIUNTA (CON CALCULATOR) ---
+// --- MODALE AGGIUNTA (CON CALCULATOR & DOSI) ---
 function AddModal({ onClose, onSave, isCook, isBarista, isManager, initialData, nameSuggestions, supplierSuggestions, subcategorySuggestions }) {
   const [name, setName] = useState(initialData?.name || '');
   const [supplier, setSupplier] = useState(initialData?.supplier || '');
@@ -723,6 +763,10 @@ function AddModal({ onClose, onSave, isCook, isBarista, isManager, initialData, 
   const [costPrice, setCostPrice] = useState(initialData?.costPrice || '');
   const [sellPrice, setSellPrice] = useState(initialData?.sellPrice || '');
   
+  // STATI PER DOSI (BAR)
+  const [capacity, setCapacity] = useState(initialData?.capacity || '');
+  const [dose, setDose] = useState(initialData?.dose || '');
+
   // SLIDERS
   const [foodCostPercent, setFoodCostPercent] = useState(30); // 15-40
   const [staffPercent, setStaffPercent] = useState(30); // 15-40
@@ -777,7 +821,9 @@ function AddModal({ onClose, onSave, isCook, isBarista, isManager, initialData, 
       unit: fd.get('unit') || '',
       expiryDate: fd.get('expiry') || '',
       costPrice: parseFloat(costPrice) || 0,
-      sellPrice: parseFloat(sellPrice) || 0
+      sellPrice: parseFloat(sellPrice) || 0,
+      capacity: parseFloat(capacity) || 0,
+      dose: parseFloat(dose) || 0
     };
     onSave(formData, initialData?.id);
   };
@@ -813,7 +859,8 @@ function AddModal({ onClose, onSave, isCook, isBarista, isManager, initialData, 
           </div>
 
           {/* --- SEZIONE PREZZI E CALCOLATORE --- */}
-          <div className="bg-slate-50 p-4 rounded-3xl border-2 border-slate-100 space-y-4">
+          {selectedCategory !== CATEGORIES.LAVANDERIA && selectedCategory !== CATEGORIES.PISCINA && selectedCategory !== CATEGORIES.ALTRO && (
+            <div className="bg-slate-50 p-4 rounded-3xl border-2 border-slate-100 space-y-4">
               <div className="flex gap-4">
                   <div className="flex-1">
                       <label className="text-[10px] font-black uppercase text-slate-500 px-2 block mb-1">Costo Acquisto (€)</label>
@@ -886,8 +933,23 @@ function AddModal({ onClose, onSave, isCook, isBarista, isManager, initialData, 
                       )}
                   </div>
               )}
-          </div>
-          {/* --------------------------- */}
+            </div>
+          )}
+          
+          {/* --- SEZIONE DOSI (SOLO BAR) --- */}
+          {selectedCategory === CATEGORIES.BAR && (
+              <div className="bg-blue-50 p-4 rounded-3xl border-2 border-blue-100 grid grid-cols-2 gap-4">
+                  <div>
+                      <label className="text-[10px] font-black uppercase text-blue-400 px-2 block mb-1">Capacità (ml)</label>
+                      <input type="number" value={capacity} onChange={e => setCapacity(e.target.value)} className="w-full border-2 border-blue-100 rounded-xl p-3 font-bold outline-none focus:border-blue-600" placeholder="Es. 700" />
+                  </div>
+                  <div>
+                      <label className="text-[10px] font-black uppercase text-blue-400 px-2 block mb-1">Dose Shot (ml)</label>
+                      <input type="number" value={dose} onChange={e => setDose(e.target.value)} className="w-full border-2 border-blue-100 rounded-xl p-3 font-bold outline-none focus:border-blue-600" placeholder="Es. 40" />
+                  </div>
+                  <p className="col-span-2 text-[9px] text-blue-400 font-bold text-center">Compilando questi campi abiliterai il tasto "Vendi Bicchiere".</p>
+              </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <input name="quantity" type="number" step="0.1" required defaultValue={initialData?.quantity || "0"} className="w-full border-4 border-slate-100 rounded-2xl p-4 text-3xl font-black focus:border-slate-900 outline-none transition-all" placeholder="Q.tà" />
