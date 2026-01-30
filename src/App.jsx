@@ -648,11 +648,8 @@ function ItemCard({ item, onUpdate, onDetails, isExpiringSoon }) {
   const isLow = !isPiatti && (item?.quantity || 0) <= (item?.minThreshold || 0);
   const meta = CATEGORIES_META[item?.category] || CATEGORIES_META[CATEGORIES.ALTRO];
   
-  // Logica Dosi (Metodo Scientifico)
   const hasDose = item?.category === CATEGORIES.BAR && item?.capacity > 0 && item?.dose > 0;
   const doseFraction = hasDose ? (item.dose / item.capacity) : 0;
-  
-  // Se l'unità è bottiglia/pz ma vogliamo decimali, o se è Kg/Lt
   const allowDecimals = !isPiatti && (['Kg', 'Lt'].includes(item?.unit) || hasDose);
 
   return (
@@ -676,7 +673,6 @@ function ItemCard({ item, onUpdate, onDetails, isExpiringSoon }) {
         
         {!isPiatti && (
             <div className="flex items-baseline gap-2">
-                {/* Mostra fino a 2 decimali se ci sono dosi, altrimenti intero */}
                 <span className={`text-6xl font-black tracking-tighter tabular-nums ${isLow && !item.isArchived ? 'text-red-700' : 'text-slate-900'}`}>
                     {parseFloat((item?.quantity || 0).toFixed(2))}
                 </span>
@@ -684,14 +680,10 @@ function ItemCard({ item, onUpdate, onDetails, isExpiringSoon }) {
             </div>
         )}
         
-        {/* Visualizzatore livello bottiglia aperta (grafico a barra) se gestiamo dosi */}
         {hasDose && !item.isArchived && (
             <div className="mt-2 flex items-center gap-2">
                 <div className="h-1.5 flex-1 bg-slate-100 rounded-full overflow-hidden">
-                    <div 
-                        className="h-full bg-blue-500 transition-all duration-500" 
-                        style={{ width: `${((item.quantity % 1) * 100).toFixed(0)}%` }}
-                    ></div>
+                    <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${((item.quantity % 1) * 100).toFixed(0)}%` }}></div>
                 </div>
                 <span className="text-[8px] font-black text-blue-400 uppercase">Aperta</span>
             </div>
@@ -706,37 +698,16 @@ function ItemCard({ item, onUpdate, onDetails, isExpiringSoon }) {
       
       {!item.isArchived && (
           <div className="flex flex-col bg-slate-50 border-t">
-             
-             {/* ZONA BAR - VENDITA A BICCHIERE */}
              {hasDose && (
                  <div className="p-2 pb-0">
-                     <button 
-                        onClick={(e) => {e.stopPropagation(); onUpdate(item.id, -doseFraction, 'Shot Venduto')}} 
-                        className="w-full py-3 bg-blue-100 text-blue-700 border-2 border-blue-200 rounded-2xl font-black text-xs hover:bg-blue-200 active:scale-95 transition-all flex items-center justify-center gap-2"
-                     >
+                     <button onClick={(e) => {e.stopPropagation(); onUpdate(item.id, -doseFraction, 'Shot Venduto')}} className="w-full py-3 bg-blue-100 text-blue-700 border-2 border-blue-200 rounded-2xl font-black text-xs hover:bg-blue-200 active:scale-95 transition-all flex items-center justify-center gap-2">
                          <Icon name="glass-water" size={16} /> VENDI BICCHIERE (-{item.dose}ml)
                      </button>
                  </div>
              )}
-
-             {/* TASTI STANDARD +/- (o Bottiglia intera) */}
              <div className="flex p-4 gap-4">
                 {isPiatti ? (
-                    <button 
-                        onClick={(e) => {
-                            e.stopPropagation(); 
-                            onUpdate(item.id, -1);
-                            const btn = e.currentTarget;
-                            const originalText = btn.innerHTML;
-                            btn.innerHTML = "REGISTRATO!";
-                            btn.className = "w-full bg-green-600 text-white py-4 rounded-2xl font-black text-xl hover:bg-green-700 active:scale-95 transition-all";
-                            setTimeout(() => {
-                                btn.innerHTML = originalText;
-                                btn.className = "w-full bg-slate-900 text-white py-4 rounded-2xl font-black text-xl hover:bg-black active:scale-95 transition-all";
-                            }, 1000);
-                        }} 
-                        className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black text-xl hover:bg-black active:scale-95 transition-all flex items-center justify-center gap-2"
-                    >
+                    <button onClick={(e) => { e.stopPropagation(); onUpdate(item.id, -1); }} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black text-xl hover:bg-black active:scale-95 transition-all flex items-center justify-center gap-2">
                         <Icon name="check-circle" size={20} /> VENDUTO
                     </button>
                 ) : (
@@ -752,57 +723,43 @@ function ItemCard({ item, onUpdate, onDetails, isExpiringSoon }) {
   );
 }
 
-// --- MODALE AGGIUNTA (CON CALCULATOR & DOSI) ---
+// --- MODALE AGGIUNTA (CON PERMESSI E DATA PRESERVATION) ---
 function AddModal({ onClose, onSave, isCook, isBarista, isManager, initialData, nameSuggestions, supplierSuggestions, subcategorySuggestions }) {
   const [name, setName] = useState(initialData?.name || '');
   const [supplier, setSupplier] = useState(initialData?.supplier || '');
   const [subcategory, setSubcategory] = useState(initialData?.subcategory || '');
   
-  // STATI PER IL CALCULATOR
   const [selectedCategory, setSelectedCategory] = useState(initialData?.category || (isCook ? CATEGORIES.RISTORANTE : isBarista ? CATEGORIES.BAR : CATEGORIES.RISTORANTE));
+  
+  // Campi sensibili
   const [costPrice, setCostPrice] = useState(initialData?.costPrice || '');
   const [sellPrice, setSellPrice] = useState(initialData?.sellPrice || '');
-  
-  // STATI PER DOSI (BAR)
   const [capacity, setCapacity] = useState(initialData?.capacity || '');
   const [dose, setDose] = useState(initialData?.dose || '');
 
-  // SLIDERS
-  const [foodCostPercent, setFoodCostPercent] = useState(30); // 15-40
-  const [staffPercent, setStaffPercent] = useState(30); // 15-40
-  const [utilityPercent, setUtilityPercent] = useState(10); // 5-20
-  const [barMultiplier, setBarMultiplier] = useState(4); // 3-7
+  // Sliders
+  const [foodCostPercent, setFoodCostPercent] = useState(30); 
+  const [staffPercent, setStaffPercent] = useState(30); 
+  const [utilityPercent, setUtilityPercent] = useState(10); 
+  const [barMultiplier, setBarMultiplier] = useState(4); 
 
-  // CALCOLO AUTOMATICO CONSIGLIATO
   const calculatorResult = useMemo(() => {
       const cost = parseFloat(costPrice);
       if (!cost || isNaN(cost)) return null;
 
-      // LOGICA RISTORANTE (COMPLESSA)
       if (selectedCategory === CATEGORIES.RISTORANTE || selectedCategory === CATEGORIES.PIATTI) {
           const recommendedPrice = cost / (foodCostPercent / 100);
           const staffCost = recommendedPrice * (staffPercent / 100);
           const utilityCost = recommendedPrice * (utilityPercent / 100);
           const netProfit = recommendedPrice - cost - staffCost - utilityCost;
           const netProfitPercent = (netProfit / recommendedPrice) * 100;
-
-          return {
-              type: 'COMPLEX',
-              recPrice: recommendedPrice,
-              breakdown: { cost, staffCost, utilityCost, netProfit, netProfitPercent }
-          };
+          return { type: 'COMPLEX', recPrice: recommendedPrice, breakdown: { cost, staffCost, utilityCost, netProfit, netProfitPercent } };
       } 
-      // LOGICA BAR (SEMPLICE)
       else if (selectedCategory === CATEGORIES.BAR) {
           const recommendedPrice = cost * barMultiplier;
           const drinkCost = (cost / recommendedPrice) * 100;
           const grossMargin = recommendedPrice - cost;
-
-          return {
-              type: 'SIMPLE',
-              recPrice: recommendedPrice,
-              breakdown: { drinkCost, grossMargin }
-          };
+          return { type: 'SIMPLE', recPrice: recommendedPrice, breakdown: { drinkCost, grossMargin } };
       }
       return null;
   }, [costPrice, selectedCategory, foodCostPercent, staffPercent, utilityPercent, barMultiplier]);
@@ -811,8 +768,10 @@ function AddModal({ onClose, onSave, isCook, isBarista, isManager, initialData, 
     e.preventDefault();
     const fd = new FormData(e.target);
     
-    // NOTA: Se l'input è nascosto (perché non è manager), non verrà inviato nel FormData.
-    // La logica in App.jsx (Parte 1) gestirà il mantenimento dei valori vecchi.
+    // LOGICA DI SALVATAGGIO INTELLIGENTE:
+    // Se sono Manager, salvo i valori dei campi.
+    // Se NON sono Manager (quindi i campi sono nascosti), mantengo i valori vecchi (initialData) per non azzerarli.
+    
     const formData = {
       name: name.trim(),
       category: selectedCategory,
@@ -822,10 +781,12 @@ function AddModal({ onClose, onSave, isCook, isBarista, isManager, initialData, 
       subcategory: subcategory.trim(),
       unit: fd.get('unit') || '',
       expiryDate: fd.get('expiry') || '',
-      costPrice: parseFloat(costPrice) || 0,
-      sellPrice: parseFloat(sellPrice) || 0,
-      capacity: parseFloat(capacity) || 0,
-      dose: parseFloat(dose) || 0
+      
+      // Se manager prendi input, altrimenti tieni vecchio
+      costPrice: isManager ? (parseFloat(costPrice) || 0) : (initialData?.costPrice || 0),
+      sellPrice: isManager ? (parseFloat(sellPrice) || 0) : (initialData?.sellPrice || 0),
+      capacity: isManager ? (parseFloat(capacity) || 0) : (initialData?.capacity || 0),
+      dose: isManager ? (parseFloat(dose) || 0) : (initialData?.dose || 0)
     };
     onSave(formData, initialData?.id);
   };
@@ -845,13 +806,7 @@ function AddModal({ onClose, onSave, isCook, isBarista, isManager, initialData, 
           <Autocomplete label="Articolo" value={name} onChange={setName} suggestions={nameSuggestions} placeholder="Cerca o inserisci..." className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none focus:border-slate-900 transition-all" />
           
           <div className="grid grid-cols-2 gap-4">
-            <select 
-                name="category" 
-                disabled={!isManager} 
-                className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none disabled:bg-slate-50" 
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-            >
+            <select name="category" disabled={!isManager} className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none disabled:bg-slate-50" value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)}>
               {Object.values(CATEGORIES).map(c => <option key={c} value={c}>{c}</option>)}
             </select>
             <select name="unit" className="w-full border-4 border-slate-100 rounded-2xl p-4 font-bold outline-none" defaultValue={initialData?.unit || ""}>
@@ -860,7 +815,7 @@ function AddModal({ onClose, onSave, isCook, isBarista, isManager, initialData, 
             </select>
           </div>
 
-          {/* --- SEZIONE PREZZI E CALCOLATORE (VISIBILE SOLO AI MANAGER) --- */}
+          {/* --- AREA PREZZI: VISIBILE SOLO SE SEI MANAGER --- */}
           {isManager && selectedCategory !== CATEGORIES.LAVANDERIA && selectedCategory !== CATEGORIES.PISCINA && selectedCategory !== CATEGORIES.ALTRO && (
             <div className="bg-slate-50 p-4 rounded-3xl border-2 border-slate-100 space-y-4">
               <div className="flex gap-4">
@@ -874,62 +829,26 @@ function AddModal({ onClose, onSave, isCook, isBarista, isManager, initialData, 
                   </div>
               </div>
 
-              {/* CALCOLATORE DINAMICO */}
               {calculatorResult && (
                   <div className={`rounded-2xl p-4 space-y-3 ${calculatorResult.type === 'COMPLEX' ? 'bg-orange-50 border border-orange-200' : 'bg-blue-50 border border-blue-200'}`}>
                       <div className="flex justify-between items-center border-b border-black/5 pb-2">
                           <span className="text-[10px] font-black uppercase tracking-widest opacity-50 flex gap-1"><Icon name="calculator" size={14} /> Analisi Prezzo</span>
                           <span className="text-xl font-black">{calculatorResult.recPrice.toFixed(2)} € <span className="text-[10px] font-bold text-slate-400">CONSIGLIATO</span></span>
                       </div>
-
-                      {/* SLIDERS PER RISTORANTE */}
                       {calculatorResult.type === 'COMPLEX' && (
                           <div className="space-y-3 pt-2">
-                              <div>
-                                  <div className="flex justify-between text-[9px] font-bold uppercase text-slate-500 mb-1">
-                                      <span>Incidenza Materia ({foodCostPercent}%)</span>
-                                  </div>
-                                  <input type="range" min="15" max="40" value={foodCostPercent} onChange={e => setFoodCostPercent(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-orange-600" />
-                              </div>
-                              <div>
-                                  <div className="flex justify-between text-[9px] font-bold uppercase text-slate-500 mb-1">
-                                      <span>Incidenza Staff ({staffPercent}%)</span>
-                                      <span>{calculatorResult.breakdown.staffCost.toFixed(2)}€</span>
-                                  </div>
-                                  <input type="range" min="15" max="40" value={staffPercent} onChange={e => setStaffPercent(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-600" />
-                              </div>
-                              <div>
-                                  <div className="flex justify-between text-[9px] font-bold uppercase text-slate-500 mb-1">
-                                      <span>Incidenza Utenze ({utilityPercent}%)</span>
-                                      <span>{calculatorResult.breakdown.utilityCost.toFixed(2)}€</span>
-                                  </div>
-                                  <input type="range" min="5" max="20" value={utilityPercent} onChange={e => setUtilityPercent(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-400" />
-                              </div>
-                              <div className="mt-2 pt-2 border-t border-orange-200 flex justify-between items-center text-orange-900">
-                                  <span className="text-[10px] font-black uppercase">Utile Netto Stimato</span>
-                                  <span className="font-black text-lg">{calculatorResult.breakdown.netProfit.toFixed(2)}€ ({calculatorResult.breakdown.netProfitPercent.toFixed(0)}%)</span>
-                              </div>
+                              <div><div className="flex justify-between text-[9px] font-bold uppercase text-slate-500 mb-1"><span>Incidenza Materia ({foodCostPercent}%)</span></div><input type="range" min="15" max="40" value={foodCostPercent} onChange={e => setFoodCostPercent(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-orange-600" /></div>
+                              <div><div className="flex justify-between text-[9px] font-bold uppercase text-slate-500 mb-1"><span>Incidenza Staff ({staffPercent}%)</span><span>{calculatorResult.breakdown.staffCost.toFixed(2)}€</span></div><input type="range" min="15" max="40" value={staffPercent} onChange={e => setStaffPercent(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-600" /></div>
+                              <div><div className="flex justify-between text-[9px] font-bold uppercase text-slate-500 mb-1"><span>Incidenza Utenze ({utilityPercent}%)</span><span>{calculatorResult.breakdown.utilityCost.toFixed(2)}€</span></div><input type="range" min="5" max="20" value={utilityPercent} onChange={e => setUtilityPercent(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-400" /></div>
+                              <div className="mt-2 pt-2 border-t border-orange-200 flex justify-between items-center text-orange-900"><span className="text-[10px] font-black uppercase">Utile Netto Stimato</span><span className="font-black text-lg">{calculatorResult.breakdown.netProfit.toFixed(2)}€ ({calculatorResult.breakdown.netProfitPercent.toFixed(0)}%)</span></div>
                           </div>
                       )}
-
-                      {/* SLIDERS PER BAR */}
                       {calculatorResult.type === 'SIMPLE' && (
                           <div className="space-y-3 pt-2">
-                              <div>
-                                  <div className="flex justify-between text-[9px] font-bold uppercase text-slate-500 mb-1">
-                                      <span>Moltiplicatore (x{barMultiplier})</span>
-                                  </div>
-                                  <input type="range" min="3" max="7" step="0.5" value={barMultiplier} onChange={e => setBarMultiplier(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600" />
-                              </div>
+                              <div><div className="flex justify-between text-[9px] font-bold uppercase text-slate-500 mb-1"><span>Moltiplicatore (x{barMultiplier})</span></div><input type="range" min="3" max="7" step="0.5" value={barMultiplier} onChange={e => setBarMultiplier(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600" /></div>
                               <div className="flex gap-2">
-                                  <div className="bg-white/50 p-2 rounded-lg flex-1 text-center border border-blue-100">
-                                      <span className="block text-[8px] font-black uppercase text-blue-400">Drink Cost</span>
-                                      <span className="font-black text-blue-900">{calculatorResult.breakdown.drinkCost.toFixed(0)}%</span>
-                                  </div>
-                                  <div className="bg-white/50 p-2 rounded-lg flex-1 text-center border border-blue-100">
-                                      <span className="block text-[8px] font-black uppercase text-blue-400">Margine</span>
-                                      <span className="font-black text-blue-900">{calculatorResult.breakdown.grossMargin.toFixed(2)}€</span>
-                                  </div>
+                                  <div className="bg-white/50 p-2 rounded-lg flex-1 text-center border border-blue-100"><span className="block text-[8px] font-black uppercase text-blue-400">Drink Cost</span><span className="font-black text-blue-900">{calculatorResult.breakdown.drinkCost.toFixed(0)}%</span></div>
+                                  <div className="bg-white/50 p-2 rounded-lg flex-1 text-center border border-blue-100"><span className="block text-[8px] font-black uppercase text-blue-400">Margine</span><span className="font-black text-blue-900">{calculatorResult.breakdown.grossMargin.toFixed(2)}€</span></div>
                               </div>
                           </div>
                       )}
@@ -938,17 +857,11 @@ function AddModal({ onClose, onSave, isCook, isBarista, isManager, initialData, 
             </div>
           )}
           
-          {/* --- SEZIONE DOSI (SOLO BAR E SOLO MANAGER) --- */}
+          {/* --- AREA DOSI: VISIBILE SOLO SE SEI MANAGER --- */}
           {isManager && selectedCategory === CATEGORIES.BAR && (
               <div className="bg-blue-50 p-4 rounded-3xl border-2 border-blue-100 grid grid-cols-2 gap-4">
-                  <div>
-                      <label className="text-[10px] font-black uppercase text-blue-400 px-2 block mb-1">Capacità (ml)</label>
-                      <input type="number" value={capacity} onChange={e => setCapacity(e.target.value)} className="w-full border-2 border-blue-100 rounded-xl p-3 font-bold outline-none focus:border-blue-600" placeholder="Es. 700" />
-                  </div>
-                  <div>
-                      <label className="text-[10px] font-black uppercase text-blue-400 px-2 block mb-1">Dose Shot (ml)</label>
-                      <input type="number" value={dose} onChange={e => setDose(e.target.value)} className="w-full border-2 border-blue-100 rounded-xl p-3 font-bold outline-none focus:border-blue-600" placeholder="Es. 40" />
-                  </div>
+                  <div><label className="text-[10px] font-black uppercase text-blue-400 px-2 block mb-1">Capacità (ml)</label><input type="number" value={capacity} onChange={e => setCapacity(e.target.value)} className="w-full border-2 border-blue-100 rounded-xl p-3 font-bold outline-none focus:border-blue-600" placeholder="Es. 700" /></div>
+                  <div><label className="text-[10px] font-black uppercase text-blue-400 px-2 block mb-1">Dose Shot (ml)</label><input type="number" value={dose} onChange={e => setDose(e.target.value)} className="w-full border-2 border-blue-100 rounded-xl p-3 font-bold outline-none focus:border-blue-600" placeholder="Es. 40" /></div>
                   <p className="col-span-2 text-[9px] text-blue-400 font-bold text-center">Compilando questi campi abiliterai il tasto "Vendi Bicchiere".</p>
               </div>
           )}
@@ -981,11 +894,10 @@ function DetailModal({ item, onClose, onDelete, onEdit, onToggleArchive, onUpdat
         <div className="p-8 pb-2">
           <div className="flex justify-between items-start">
              <div className={`px-4 py-2 rounded-xl inline-flex ${meta.color} text-white text-[10px] font-black uppercase mb-4 shadow-md`}><Icon name={meta.icon} size={14} className="mr-2" /> {item?.category}</div>
-             {isManager && (
-               <button onClick={onEdit} className="bg-blue-50 text-blue-600 p-3 rounded-xl border border-blue-100 hover:bg-blue-100 transition-all flex items-center gap-2 font-black text-[10px] uppercase">
+             {/* EDIT VISIBILE A TUTTI, MA IL CONTENUTO DELLA MODALE CAMBIA IN BASE AL RUOLO */}
+             <button onClick={onEdit} className="bg-blue-50 text-blue-600 p-3 rounded-xl border border-blue-100 hover:bg-blue-100 transition-all flex items-center gap-2 font-black text-[10px] uppercase">
                  <Icon name="pencil" size={16} /> Modifica
-               </button>
-             )}
+             </button>
           </div>
           <h2 className="text-3xl font-black uppercase italic tracking-tighter leading-none text-slate-900">{item?.name}</h2>
           {item?.subcategory && <p className="text-lg font-bold text-slate-500 mt-1 flex items-center gap-1"><Icon name="tag" size={14} /> {item.subcategory}</p>}
@@ -1001,39 +913,22 @@ function DetailModal({ item, onClose, onDelete, onEdit, onToggleArchive, onUpdat
           )}
           {isPiatti && !item.isArchived && (
               <div className="mt-6 p-6 rounded-[2rem] border-4 bg-slate-50 border-slate-200 text-center flex flex-col items-center justify-center gap-3">
-                  <div>
-                    <p className="text-slate-500 font-bold italic">Prodotto "A Flusso"</p>
-                    <p className="text-xs text-slate-400">La quantità non viene tracciata, solo le vendite.</p>
-                  </div>
-                  <button onClick={() => { onUpdate(item.id, 1); onClose(); }} className="px-4 py-2 bg-red-50 text-red-600 rounded-xl font-black text-[10px] uppercase border border-red-100 hover:bg-red-100 flex items-center gap-2">
-                      <Icon name="undo-2" size={14} /> Annulla Errore (+1)
-                  </button>
+                  <div><p className="text-slate-500 font-bold italic">Prodotto "A Flusso"</p><p className="text-xs text-slate-400">La quantità non viene tracciata, solo le vendite.</p></div>
+                  <button onClick={() => { onUpdate(item.id, 1); onClose(); }} className="px-4 py-2 bg-red-50 text-red-600 rounded-xl font-black text-[10px] uppercase border border-red-100 hover:bg-red-100 flex items-center gap-2"><Icon name="undo-2" size={14} /> Annulla Errore (+1)</button>
               </div>
           )}
           {item.isArchived && (
-              <div className="mt-6 p-6 rounded-[2rem] border-4 bg-yellow-50 border-yellow-400 text-center">
-                  <p className="text-yellow-700 font-black italic">PRODOTTO OBSOLETO</p>
-                  <p className="text-xs text-yellow-600">Attualmente nascosto dal menu attivo.</p>
-              </div>
+              <div className="mt-6 p-6 rounded-[2rem] border-4 bg-yellow-50 border-yellow-400 text-center"><p className="text-yellow-700 font-black italic">PRODOTTO OBSOLETO</p><p className="text-xs text-yellow-600">Attualmente nascosto dal menu attivo.</p></div>
           )}
-
         </div>
         <div className="p-8 pt-4 space-y-4">
-          
           <div className="p-5 rounded-2xl border-2 bg-slate-50 border-slate-200"><p className="text-[10px] font-black uppercase text-slate-400 mb-1 flex items-center gap-2"><Icon name="truck" size={14} /> Fornitore</p><p className="text-xl font-black text-slate-900 uppercase truncate">{item?.supplier || "Non specificato"}</p></div>
           {item?.expiryDate && <div className="p-5 rounded-2xl border-2 bg-orange-50 border-orange-200 text-orange-900"><p className="text-[10px] font-black uppercase mb-1 flex items-center gap-2"><Icon name="calendar" size={14} /> Scadenza</p><p className="text-xl font-black uppercase">{new Date(item.expiryDate).toLocaleDateString('it-IT')}</p></div>}
           
           <div className="flex gap-3 pt-4 flex-col">
             {isManager && item.category === CATEGORIES.PIATTI && (
-                <button 
-                    onClick={onToggleArchive} 
-                    className={`p-4 rounded-2xl font-black text-sm uppercase flex items-center justify-center gap-2 transition-all ${item.isArchived ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'}`}
-                >
-                    <Icon name={item.isArchived ? "refresh-cw" : "archive"} size={18} />
-                    {item.isArchived ? "RIPRISTINA NEL MENU" : "RENDI OBSOLETO"}
-                </button>
+                <button onClick={onToggleArchive} className={`p-4 rounded-2xl font-black text-sm uppercase flex items-center justify-center gap-2 transition-all ${item.isArchived ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'}`}><Icon name={item.isArchived ? "refresh-cw" : "archive"} size={18} />{item.isArchived ? "RIPRISTINA NEL MENU" : "RENDI OBSOLETO"}</button>
             )}
-
             <div className="flex gap-3">
                 {isManager && <button onClick={() => onDelete(item.id)} className="p-5 bg-red-50 text-red-600 rounded-2xl font-black border-2 border-red-100 hover:bg-red-100 transition-all"><Icon name="trash-2" size={24} /></button>}
                 <button onClick={onClose} className="flex-1 bg-slate-200 text-slate-700 p-5 rounded-2xl font-black text-xl uppercase tracking-tighter hover:bg-slate-300 transition-all">CHIUDI</button>
@@ -1062,7 +957,6 @@ function StatsModal({ onClose, items }) {
       
       const start = new Date(startDate); start.setHours(0,0,0,0);
       const end = new Date(endDate); end.setHours(23,59,59,999);
-
       const diffTime = Math.abs(end - start);
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
       const isMonthlyMode = diffDays > 60; 
@@ -1073,177 +967,77 @@ function StatsModal({ onClose, items }) {
       snapshot.docs.forEach(doc => {
         const log = doc.data();
         const logDate = new Date(log.date);
-        
         if (logDate >= start && logDate <= end) {
-          if (!grouped[log.itemName]) {
-            grouped[log.itemName] = { name: log.itemName, loaded: 0, sold: 0, category: log.category };
-          }
-          if (log.quantityChange > 0) {
-            grouped[log.itemName].loaded += log.quantityChange;
-          } else {
-            grouped[log.itemName].sold += Math.abs(log.quantityChange);
-          }
+          if (!grouped[log.itemName]) grouped[log.itemName] = { name: log.itemName, loaded: 0, sold: 0, category: log.category };
+          if (log.quantityChange > 0) grouped[log.itemName].loaded += log.quantityChange;
+          else grouped[log.itemName].sold += Math.abs(log.quantityChange);
 
           const matchesQuery = reportSearchQuery ? log.itemName.toLowerCase().includes(reportSearchQuery.toLowerCase()) : true;
-
           if (log.quantityChange < 0 && matchesQuery) { 
-              let key;
-              if (isMonthlyMode) {
-                  key = logDate.toISOString().slice(0, 7); 
-              } else {
-                  key = logDate.toISOString().slice(0, 10); 
-              }
-
+              let key = isMonthlyMode ? logDate.toISOString().slice(0, 7) : logDate.toISOString().slice(0, 10); 
               if (!chartGrouped[key]) chartGrouped[key] = 0;
               chartGrouped[key] += Math.abs(log.quantityChange);
           }
         }
       });
 
-      const finalReport = Object.values(grouped).map(i => ({
-         ...i,
-         loaded: parseFloat(i.loaded.toFixed(2)),
-         sold: parseFloat(i.sold.toFixed(2))
-      })).sort((a,b) => b.sold - a.sold);
+      const finalReport = Object.values(grouped).map(i => ({ ...i, loaded: parseFloat(i.loaded.toFixed(2)), sold: parseFloat(i.sold.toFixed(2)) })).sort((a,b) => b.sold - a.sold);
       setReportData(finalReport);
-
       const chartArray = Object.keys(chartGrouped).map(key => {
           let label = key;
           if (isMonthlyMode) {
               const [y, m] = key.split('-');
-              const dateObj = new Date(parseInt(y), parseInt(m)-1, 1);
-              label = dateObj.toLocaleDateString('it-IT', { month: 'short', year: '2-digit' }); 
+              label = new Date(parseInt(y), parseInt(m)-1, 1).toLocaleDateString('it-IT', { month: 'short', year: '2-digit' }); 
           } else {
               const [y, m, d] = key.split('-');
               label = `${d}/${m}`; 
           }
-
-          return {
-              sortKey: key, 
-              date: label,  
-              vendite: parseFloat(chartGrouped[key].toFixed(2))
-          };
+          return { sortKey: key, date: label, vendite: parseFloat(chartGrouped[key].toFixed(2)) };
       });
-      
       chartArray.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
-
       setChartData(chartArray);
-
-    } catch (err) {
-      alert("Errore generazione report: " + err.message);
-    }
+    } catch (err) { alert("Errore generazione report: " + err.message); }
     setLoading(false);
   };
 
-  useEffect(() => {
-      if (reportData.length > 0) generateReport();
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reportSearchQuery]);
-
-  const filteredReportData = useMemo(() => {
-    if (!reportSearchQuery) return reportData;
-    return reportData.filter(item => 
-        item.name.toLowerCase().includes(reportSearchQuery.toLowerCase())
-    );
-  }, [reportData, reportSearchQuery]);
+  useEffect(() => { if (reportData.length > 0) generateReport(); }, [reportSearchQuery]);
+  const filteredReportData = useMemo(() => { if (!reportSearchQuery) return reportData; return reportData.filter(item => item.name.toLowerCase().includes(reportSearchQuery.toLowerCase())); }, [reportData, reportSearchQuery]);
 
   return (
     <div className="fixed inset-0 z-[500] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={onClose}></div>
       <div className="relative bg-white w-full max-w-4xl rounded-[2.5rem] overflow-hidden shadow-2xl animate-modal flex flex-col max-h-[95vh]">
         <div className="p-8 border-b bg-slate-900 text-white flex justify-between items-center">
-          <div>
-             <h2 className="text-2xl font-black uppercase italic tracking-tighter text-yellow-400">Report Vendite</h2>
-             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Analisi Movimenti</p>
-          </div>
+          <div><h2 className="text-2xl font-black uppercase italic tracking-tighter text-yellow-400">Report Vendite</h2><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Analisi Movimenti</p></div>
           <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors"><Icon name="x" size={32} /></button>
         </div>
-
         <div className="p-6 bg-slate-50 border-b space-y-4">
             <div className="flex flex-col sm:flex-row gap-4 items-end">
-                <label className="w-full">
-                    <span className="text-[10px] font-black uppercase text-slate-500 block mb-1">Dal Giorno</span>
-                    <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full p-3 rounded-xl border-2 border-slate-200 font-bold" />
-                </label>
-                <label className="w-full">
-                    <span className="text-[10px] font-black uppercase text-slate-500 block mb-1">Al Giorno</span>
-                    <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full p-3 rounded-xl border-2 border-slate-200 font-bold" />
-                </label>
-                <button onClick={generateReport} disabled={loading} className="w-full sm:w-auto bg-blue-600 text-white px-6 py-3 rounded-xl font-black uppercase hover:bg-blue-700 transition-all shadow-lg">
-                    {loading ? '...' : 'Calcola'}
-                </button>
+                <label className="w-full"><span className="text-[10px] font-black uppercase text-slate-500 block mb-1">Dal Giorno</span><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full p-3 rounded-xl border-2 border-slate-200 font-bold" /></label>
+                <label className="w-full"><span className="text-[10px] font-black uppercase text-slate-500 block mb-1">Al Giorno</span><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full p-3 rounded-xl border-2 border-slate-200 font-bold" /></label>
+                <button onClick={generateReport} disabled={loading} className="w-full sm:w-auto bg-blue-600 text-white px-6 py-3 rounded-xl font-black uppercase hover:bg-blue-700 transition-all shadow-lg">{loading ? '...' : 'Calcola'}</button>
             </div>
-            
-            <div className="relative">
-                <Icon name="search" size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input 
-                    type="text" 
-                    placeholder="Cerca prodotto per filtrare grafico e tabella..." 
-                    value={reportSearchQuery}
-                    onChange={(e) => setReportSearchQuery(e.target.value)}
-                    className="w-full p-3 pl-10 bg-white border-2 border-slate-200 rounded-xl font-bold text-slate-700 focus:border-blue-600 outline-none transition-colors placeholder:font-medium"
-                />
-            </div>
+            <div className="relative"><Icon name="search" size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" /><input type="text" placeholder="Cerca prodotto per filtrare grafico e tabella..." value={reportSearchQuery} onChange={(e) => setReportSearchQuery(e.target.value)} className="w-full p-3 pl-10 bg-white border-2 border-slate-200 rounded-xl font-bold text-slate-700 focus:border-blue-600 outline-none transition-colors placeholder:font-medium" /></div>
         </div>
-
         {chartData.length > 0 && (
             <div className="h-64 w-full bg-white p-4 border-b border-slate-100">
-                <p className="text-[10px] font-black uppercase text-slate-400 mb-2 text-center">
-                    Andamento Vendite {reportSearchQuery ? `"${reportSearchQuery}"` : "Totali"}
-                </p>
+                <p className="text-[10px] font-black uppercase text-slate-400 mb-2 text-center">Andamento Vendite {reportSearchQuery ? `"${reportSearchQuery}"` : "Totali"}</p>
                 <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={chartData}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                         <XAxis dataKey="date" tick={{fontSize: 10, fill: '#64748b'}} axisLine={false} tickLine={false} />
                         <YAxis tick={{fontSize: 10, fill: '#64748b'}} axisLine={false} tickLine={false} />
-                        <Tooltip 
-                            contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'}}
-                            cursor={{fill: '#f1f5f9'}}
-                        />
-                        <Bar dataKey="vendite" fill="#0f172a" radius={[4, 4, 0, 0]}>
-                             {chartData.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.vendite > 10 ? '#2563eb' : '#0f172a'} />
-                             ))}
-                        </Bar>
+                        <Tooltip contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'}} cursor={{fill: '#f1f5f9'}} />
+                        <Bar dataKey="vendite" fill="#0f172a" radius={[4, 4, 0, 0]}>{chartData.map((entry, index) => (<Cell key={`cell-${index}`} fill={entry.vendite > 10 ? '#2563eb' : '#0f172a'} />))}</Bar>
                     </BarChart>
                 </ResponsiveContainer>
             </div>
         )}
-
         <div className="flex-1 overflow-y-auto p-6 space-y-2">
-            {reportData.length === 0 ? (
-                <div className="text-center text-slate-400 py-10 font-bold italic">Nessun dato o report non generato.</div>
-            ) : filteredReportData.length === 0 ? (
-                <div className="text-center text-slate-400 py-10 font-bold italic">Nessun prodotto trovato con questo nome.</div>
-            ) : (
+            {reportData.length === 0 ? (<div className="text-center text-slate-400 py-10 font-bold italic">Nessun dato o report non generato.</div>) : filteredReportData.length === 0 ? (<div className="text-center text-slate-400 py-10 font-bold italic">Nessun prodotto trovato con questo nome.</div>) : (
                 <table className="w-full text-left border-collapse">
-                    <thead className="sticky top-0 bg-white z-10 shadow-sm">
-                        <tr>
-                            <th className="p-3 text-[10px] font-black uppercase text-slate-400">Prodotto</th>
-                            <th className="p-3 text-[10px] font-black uppercase text-green-600 text-center">Caricati</th>
-                            <th className="p-3 text-[10px] font-black uppercase text-red-600 text-center">Venduti</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {filteredReportData.map((row, i) => (
-                            <tr key={i} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-                                <td className="p-3">
-                                    <div className="font-bold text-slate-900">{row.name}</div>
-                                    <div className="text-[9px] uppercase text-slate-400">{row.category}</div>
-                                </td>
-                                <td className="p-3 text-center">
-                                    {row.loaded > 0 ? (
-                                        <span className="bg-green-100 text-green-800 px-2 py-1 rounded-lg text-xs font-black">+{row.loaded}</span>
-                                    ) : <span className="text-slate-200">-</span>}
-                                </td>
-                                <td className="p-3 text-center">
-                                    {row.sold > 0 ? (
-                                        <span className="bg-red-100 text-red-800 px-2 py-1 rounded-lg text-xs font-black">-{row.sold}</span>
-                                    ) : <span className="text-slate-200">-</span>}
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
+                    <thead className="sticky top-0 bg-white z-10 shadow-sm"><tr><th className="p-3 text-[10px] font-black uppercase text-slate-400">Prodotto</th><th className="p-3 text-[10px] font-black uppercase text-green-600 text-center">Caricati</th><th className="p-3 text-[10px] font-black uppercase text-red-600 text-center">Venduti</th></tr></thead>
+                    <tbody>{filteredReportData.map((row, i) => (<tr key={i} className="border-b border-slate-100 last:border-0 hover:bg-slate-50"><td className="p-3"><div className="font-bold text-slate-900">{row.name}</div><div className="text-[9px] uppercase text-slate-400">{row.category}</div></td><td className="p-3 text-center">{row.loaded > 0 ? (<span className="bg-green-100 text-green-800 px-2 py-1 rounded-lg text-xs font-black">+{row.loaded}</span>) : <span className="text-slate-200">-</span>}</td><td className="p-3 text-center">{row.sold > 0 ? (<span className="bg-red-100 text-red-800 px-2 py-1 rounded-lg text-xs font-black">-{row.sold}</span>) : <span className="text-slate-200">-</span>}</td></tr>))}</tbody>
                 </table>
             )}
         </div>
