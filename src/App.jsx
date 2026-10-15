@@ -159,12 +159,12 @@ const ABSENCE_CODES = ['F', 'M', 'P']; // Ferie, Malattia, Permesso
 const ABSENCE_LABELS = { F: 'Ferie', M: 'Malattia', P: 'Permesso' };
 
 // ore previste per ciascun giorno della settimana [lun..dom] dall'orario standard
-export function scheduleHours(schedule) {
+function scheduleHours(schedule) {
   return [0, 1, 2, 3, 4, 5, 6].map((i) => sumHours(schedule && (schedule[i] || schedule[String(i)])));
 }
 
 // legge una cella del LUL: null = vuota, 'F'/'M'/'P' = assenza, numero = ore, undefined = non valida
-export function parseCell(raw) {
+function parseCell(raw) {
   const s = String(raw === undefined || raw === null ? '' : raw).trim().toUpperCase();
   if (s === '') return null;
   if (ABSENCE_CODES.includes(s)) return s;
@@ -184,7 +184,7 @@ export function parseCell(raw) {
  * - Assenze F/M/P: coprono le ore previste di quel giorno (non sono ore lavorate, non sono mancanze).
  * - Le settimane a cavallo di due mesi sono calcolate per la sola parte del mese.
  */
-export function computeLul(emp, priv, entries, year, month, today) {
+function computeLul(emp, priv, entries, year, month, today) {
   const dim = new Date(year, month + 1, 0).getDate();
   const W = Number(priv && priv.weeklyHours) || 0;
   const isCall = emp.type === 'chiamata';
@@ -270,7 +270,7 @@ const FREQ = {
   custom: { label: 'Ogni N giorni', warn: 3 }
 };
 
-export function checkNextDue(c) {
+function checkNextDue(c) {
   if (!c.lastDoneAt) return null;
   const last = startOfDay(new Date(c.lastDoneAt));
   switch (c.frequency) {
@@ -282,7 +282,7 @@ export function checkNextDue(c) {
   }
 }
 
-export function checkStatus(c, today) {
+function checkStatus(c, today) {
   const due = checkNextDue(c);
   if (!due) return { state: 'due', due: null, daysLeft: 0, never: true };
   const daysLeft = diffDays(due, today);
@@ -299,7 +299,7 @@ export function checkStatus(c, today) {
 // ============================================================
 const DEADLINE_CATEGORIES = ['Corso / formazione', 'Visita medica', 'Contratto', 'Certificato / licenza', 'Assicurazione', 'Altro'];
 
-export function deadlineStatus(dl, today) {
+function deadlineStatus(dl, today) {
   if (!dl.dueDate) return { state: 'ok', daysLeft: 9999 };
   const daysLeft = diffDays(parseISODate(dl.dueDate), today);
   const remind = dl.remindDays === undefined || dl.remindDays === null ? 30 : Number(dl.remindDays);
@@ -344,25 +344,58 @@ function useMediaQuery(q) {
   return m;
 }
 
+const ModalCtx = React.createContext(null);
+const modalStack = []; // con più finestre aperte, Esc chiude solo l'ultima
+
 function Modal({ onClose, children, size = 'max-w-lg', z = 'z-[300]' }) {
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const timer = useRef(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
+
+  // chiusura con piccola animazione (130 ms)
+  const requestClose = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setClosing(true);
+    timer.current = setTimeout(() => onCloseRef.current(), 130);
+  }, []);
+
+  useEffect(() => {
+    const id = {};
+    modalStack.push(id);
+    const onKey = (e) => { if (e.key === 'Escape' && modalStack[modalStack.length - 1] === id) requestClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      clearTimeout(timer.current);
+      const i = modalStack.indexOf(id);
+      if (i >= 0) modalStack.splice(i, 1);
+    };
+  }, [requestClose]);
+
   return (
-    <div className={`fixed inset-0 ${z} flex items-center justify-center p-3 sm:p-4`}>
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}></div>
-      <div className={`relative bg-white w-full ${size} rounded-[2rem] sm:rounded-[2.5rem] overflow-hidden shadow-2xl animate-modal flex flex-col max-h-[94vh]`}>
-        {children}
+    <ModalCtx.Provider value={requestClose}>
+      <div className={`fixed inset-0 ${z} flex items-center justify-center p-3 sm:p-4 ${closing ? 'is-closing' : ''}`}>
+        <div className="modal-backdrop absolute inset-0 bg-black/50" onClick={requestClose}></div>
+        <div className={`relative bg-white w-full ${size} rounded-[2rem] sm:rounded-[2.5rem] overflow-hidden shadow-2xl animate-modal flex flex-col max-h-[94vh]`}>
+          {children}
+        </div>
       </div>
-    </div>
+    </ModalCtx.Provider>
   );
 }
 
 function ModalHeader({ title, subtitle, onClose }) {
+  const requestClose = React.useContext(ModalCtx);
   return (
     <div className="p-5 sm:p-6 border-b flex justify-between items-center bg-slate-50 flex-shrink-0">
       <div className="min-w-0">
         <h2 className="text-2xl font-black uppercase italic tracking-tighter text-slate-900 truncate">{title}</h2>
         {subtitle && <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{subtitle}</p>}
       </div>
-      <button onClick={onClose} className="text-slate-400 hover:text-red-500 transition-colors flex-shrink-0 ml-3"><Icon name="x" size={32} /></button>
+      <button onClick={requestClose || onClose} className="text-slate-400 hover:text-red-500 transition-colors flex-shrink-0 ml-3"><Icon name="x" size={32} /></button>
     </div>
   );
 }
@@ -399,13 +432,13 @@ const Chip = ({ active, onClick, color = 'bg-slate-900', children }) => (
 );
 
 const Empty = ({ children }) => (
-  <div className="text-center py-16 opacity-60 font-black italic uppercase text-slate-400 text-sm">{children}</div>
+  <div className="anim-fade text-center py-16 opacity-60 font-black italic uppercase text-slate-400 text-sm">{children}</div>
 );
 
 const AddFab = ({ onClick, children }) => (
   <button
     onClick={onClick}
-    className="fixed bottom-8 right-6 z-[200] bg-slate-900 text-white px-7 py-5 rounded-full shadow-[0_4px_14px_0_rgba(0,0,0,0.3)] flex items-center gap-3 active:scale-95 hover:-translate-y-1 transition-all font-black uppercase tracking-widest text-sm"
+    className="anim-pop fixed bottom-8 right-6 z-[200] bg-slate-900 text-white px-7 py-5 rounded-full shadow-[0_4px_14px_0_rgba(0,0,0,0.3)] flex items-center gap-3 active:scale-95 hover:-translate-y-1 transition-all font-black uppercase tracking-widest text-sm"
   >
     <Icon name="plus" size={22} strokeWidth={3} /> {children}
   </button>
@@ -444,6 +477,29 @@ function PrintSheet({ landscape = true, children }) {
   );
 }
 const doPrint = () => setTimeout(() => window.print(), 60);
+
+// piccola vibrazione di conferma (solo dove il telefono/tablet la supporta)
+const buzz = (ms = 12) => { try { if (navigator.vibrate) navigator.vibrate(ms); } catch { /* ignore */ } };
+
+// lucciole decorative (solo animazioni CSS, leggerissime)
+const FIREFLIES = [
+  { l: '6%', t: '38%', dx: '18px', dy: '-26px', t1: '7s', g: '3.1s', d: '0s' },
+  { l: '19%', t: '66%', dx: '-14px', dy: '-20px', t1: '9s', g: '4.2s', d: '-2s' },
+  { l: '34%', t: '24%', dx: '22px', dy: '16px', t1: '8s', g: '3.6s', d: '-4s' },
+  { l: '52%', t: '72%', dx: '-20px', dy: '-24px', t1: '10s', g: '3.9s', d: '-1s' },
+  { l: '68%', t: '30%', dx: '16px', dy: '22px', t1: '7.5s', g: '2.9s', d: '-3s' },
+  { l: '82%', t: '60%', dx: '-18px', dy: '-18px', t1: '9.5s', g: '4.4s', d: '-5s' },
+  { l: '93%', t: '26%', dx: '12px', dy: '24px', t1: '8.5s', g: '3.3s', d: '-2.5s' }
+];
+function Fireflies() {
+  return (
+    <div aria-hidden="true" className="absolute inset-0 overflow-hidden pointer-events-none">
+      {FIREFLIES.map((f, i) => (
+        <span key={i} className="firefly" style={{ left: f.l, top: f.t, '--dx': f.dx, '--dy': f.dy, '--t': f.t1, '--g': f.g, '--d': f.d }} />
+      ))}
+    </div>
+  );
+}
 
 // ============================================================
 //  SCRITTURA A MANO (penna del tablet) — salva i tratti come piccolo testo JSON
@@ -534,7 +590,7 @@ function InkCanvas({ strokes, h, onChange, disabled = false }) {
     if (disabled || tool === 'scroll') return;
     if (onlyPen && e.pointerType === 'touch') return;
     e.preventDefault();
-    try { canvasRef.current.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    try { canvasRef.current.setPointerCapture(e.pointerId); } catch { /* ignore */ }
     const [x, y] = point(e);
     if (tool === 'eraser') {
       drawing.current = { mode: 'erase', changed: false };
@@ -725,7 +781,7 @@ function ShoppingPage({ role, onBack, onLogout }) {
     return () => unsub();
   }, []);
 
-  const saveFields = async (ids, values) => {
+const saveFields = async (ids, values) => {
     setSaving(true);
     try {
       const payload = { updatedAt: new Date().toISOString() };
@@ -856,7 +912,7 @@ function MeetingDetail({ item, onClose, isWide }) {
   const [saveError, setSaveError] = useState('');
   const dirty = useRef({ meta: false, ink: false });
   const latest = useRef({});
-  latest.current = { title, notes, ink };
+  useEffect(() => { latest.current = { title, notes, ink }; });
 
   useEffect(() => {
     let alive = true;
@@ -869,7 +925,7 @@ function MeetingDetail({ item, onClose, isWide }) {
             const j = JSON.parse(snap.data().data);
             parsed = { strokes: Array.isArray(j.strokes) ? j.strokes : [], h: j.h || INK_H0 };
           }
-        } catch (e) { /* foglio vuoto */ }
+        } catch { /* foglio vuoto */ }
         setInk(parsed);
       })
       .catch((e) => { if (alive) setInkError(e.message); });
@@ -1010,7 +1066,7 @@ function MeetingPage({ items, role, onBack }) {
   };
 
   const toggle = async (it) => {
-    try { await updateDoc(doc(db, 'meetingItems', it.id), { done: !it.done, updatedAt: new Date().toISOString() }); }
+    try { buzz(); await updateDoc(doc(db, 'meetingItems', it.id), { done: !it.done, updatedAt: new Date().toISOString() }); }
     catch (err) { alert('Errore: ' + err.message); }
   };
 
@@ -1039,7 +1095,7 @@ function MeetingPage({ items, role, onBack }) {
       {list.length === 0 ? (
         <Empty>{filter === 'done' ? 'Nessun punto completato' : 'Nessun punto. Aggiungine uno!'}</Empty>
       ) : (
-        <div className="space-y-3">
+        <div className="stagger space-y-3">
           {list.map((it) => (
             <div
               key={it.id}
@@ -1050,7 +1106,7 @@ function MeetingPage({ items, role, onBack }) {
                 aria-label="Segna fatto"
                 className={`w-12 h-12 flex-shrink-0 rounded-full border-4 flex items-center justify-center active:scale-90 transition-all ${it.done ? 'bg-green-600 border-green-600 text-white' : 'border-slate-300 text-transparent hover:border-green-500'}`}
               >
-                <Icon name="check-circle" size={24} />
+                <Icon name="check-circle" size={24} className={it.done ? 'anim-pop' : ''} />
               </button>
               <button onClick={() => setSelectedId(it.id)} className="flex-1 min-w-0 text-left py-2">
                 <p className={`font-black text-lg leading-tight ${it.done ? 'line-through text-slate-400' : 'text-slate-900'}`}>{it.title}</p>
@@ -1087,7 +1143,7 @@ function MeetingPage({ items, role, onBack }) {
         <>
           {listPane}
           {selected && (
-            <div className="fixed inset-0 z-[400] bg-white overflow-y-auto">
+            <div className="anim-slide fixed inset-0 z-[400] bg-white overflow-y-auto">
               <MeetingDetail key={selected.id} item={selected} isWide={false} onClose={() => setSelectedId(null)} />
             </div>
           )}
@@ -1190,6 +1246,7 @@ function WorksPage({ works, role, isManager, onBack }) {
   const setStatus = async (w, status) => {
     if (w.status === status) return;
     try {
+      buzz();
       const upd = { status, updatedAt: new Date().toISOString(), updatedBy: role };
       upd.doneAt = status === 'done' ? new Date().toISOString() : null;
       await updateDoc(doc(db, 'works', w.id), upd);
@@ -1234,7 +1291,7 @@ function WorksPage({ works, role, isManager, onBack }) {
       {list.length === 0 ? (
         <Empty>Nessuna voce</Empty>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div className="stagger grid grid-cols-1 md:grid-cols-2 gap-5">
           {list.map((w) => {
             const t = WORK_TYPES[w.type] || WORK_TYPES.rotto;
             const st = WORK_STATUS[w.status] || WORK_STATUS.todo;
@@ -1432,9 +1489,10 @@ function ChecklistPage({ checks, role, isManager, today, onBack }) {
   });
 
   const markDone = async (c) => {
-    if (armed !== c.id) { setArmed(c.id); return; }
+    if (armed !== c.id) { buzz(8); setArmed(c.id); return; }
     setArmed(null);
     try {
+      buzz(18);
       const at = new Date().toISOString();
       await addDoc(collection(db, 'checkLogs'), { checkId: c.id, title: c.title, at, by: role });
       await updateDoc(doc(db, 'checks', c.id), { lastDoneAt: at, lastDoneBy: role });
@@ -1481,7 +1539,7 @@ function ChecklistPage({ checks, role, isManager, today, onBack }) {
       {list.length === 0 ? (
         <Empty>{filter === 'due' ? (checks.length ? 'Tutto fatto! 🎉' : 'Nessun controllo inserito') : 'Nessun controllo'}</Empty>
       ) : (
-        <div className="space-y-4">
+        <div className="stagger space-y-4">
           {list.map((c) => {
             const stl = stateStyle[c.st.state];
             const doneToday = c.lastDoneAt && diffDays(new Date(c.lastDoneAt), today) === 0;
@@ -1505,7 +1563,7 @@ function ChecklistPage({ checks, role, isManager, today, onBack }) {
                   </div>
                   <div className="sm:w-52 flex-shrink-0">
                     {doneToday ? (
-                      <div className="w-full bg-green-100 text-green-700 py-4 rounded-2xl font-black text-center flex items-center justify-center gap-2"><Icon name="check-circle" size={20} /> FATTO</div>
+                      <div className="anim-pop w-full bg-green-100 text-green-700 py-4 rounded-2xl font-black text-center flex items-center justify-center gap-2"><Icon name="check-circle" size={20} /> FATTO</div>
                     ) : (
                       <button
                         onClick={() => markDone(c)}
@@ -1715,7 +1773,7 @@ function EmployeesTab({ employees, priv }) {
     <div className="space-y-4">
       <button onClick={() => setEditing('new')} className={BTN_PRIMARY}><Icon name="user-plus" size={22} className="inline mr-2 -mt-1" /> Nuovo dipendente</button>
       {sorted.length === 0 && <Empty>Nessun dipendente inserito</Empty>}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="stagger grid grid-cols-1 md:grid-cols-2 gap-4">
         {sorted.map((e) => {
           const p = priv[e.id] || {};
           const days = [0, 1, 2, 3, 4, 5, 6].filter((i) => fmtRanges(e.schedule && (e.schedule[i] || e.schedule[String(i)])));
@@ -1752,7 +1810,6 @@ function EmployeesTab({ employees, priv }) {
     </div>
   );
 }
-
 // ============================================================
 //  TURNI DELLA SETTIMANA
 //  shifts/{lunedì-della-settimana}  ->  assignments: { [idDipendente]: { 0..6: [{from,to}] } }
@@ -1761,12 +1818,12 @@ function EmployeesTab({ employees, priv }) {
 const copyText = async (text) => {
   try {
     await navigator.clipboard.writeText(text);
-  } catch (e) {
+  } catch {
     const ta = document.createElement('textarea');
     ta.value = text;
     document.body.appendChild(ta);
     ta.select();
-    try { document.execCommand('copy'); } catch (err) { /* ignore */ }
+    try { document.execCommand('copy'); } catch { /* ignore */ }
     document.body.removeChild(ta);
   }
   alert('Copiato negli appunti ✓');
@@ -2012,7 +2069,7 @@ function ShiftsPage({ isManager, today, onBack }) {
             <>
               <button onClick={copyAll} className={`${BTN_SOFT} w-full`}><Icon name="copy" size={14} /> Copia il riepilogo di tutti</button>
               {noPhone > 0 && <p className="bg-orange-50 text-orange-800 text-xs font-bold p-3 rounded-xl">{noPhone} dipendent{noPhone === 1 ? 'e' : 'i'} senza telefono: WhatsApp si aprirà senza destinatario e potrai sceglierlo tu.</p>}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="stagger grid grid-cols-1 md:grid-cols-2 gap-4">
                 {withShifts.map((e) => (
                   <div key={e.id} className="bg-white rounded-[2rem] shadow-xl border-4 border-white p-5 space-y-3">
                     <div>
@@ -2185,7 +2242,7 @@ function DeadlinesTab({ deadlines, employees, today }) {
     <div className="space-y-4">
       <button onClick={() => setEditing('new')} className={BTN_PRIMARY}><Icon name="plus" size={22} className="inline mr-2 -mt-1" /> Nuova scadenza</button>
       {list.length === 0 && <Empty>Nessuna scadenza inserita</Empty>}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="stagger grid grid-cols-1 md:grid-cols-2 gap-4">
         {list.map((d) => {
           const s = style[d.st.state];
           const emp = d.employeeId ? byId[d.employeeId] : null;
@@ -2507,16 +2564,20 @@ function EconomiaPage({ deadlines, today, onBack }) {
 // ============================================================
 //  HOME  (grandi tasti, uno per sezione)
 // ============================================================
-function Home({ role, sections, badges, onOpen, onLogout, dataError }) {
+function Home({ role, sections, badges, onOpen, onLogout, dataError, canInstall, onInstall, iosTip, onDismissTip }) {
   return (
     <div className="min-h-screen bg-slate-50">
-      <header className="bg-slate-900 text-white p-5 sm:p-6 shadow-xl">
-        <div className="max-w-5xl mx-auto flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-black uppercase italic tracking-tighter text-yellow-400 leading-none">Lucciole</h1>
+      <header className="relative overflow-hidden bg-slate-900 text-white p-5 sm:p-6 pb-9 sm:pb-10 shadow-xl">
+        <Fireflies />
+        <div className="relative max-w-5xl mx-auto flex justify-between items-center gap-3">
+          <div className="anim-fade">
+            <h1 className="text-3xl sm:text-4xl font-black uppercase italic tracking-tighter text-yellow-400 leading-none">Lucciole</h1>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">nella Nebbia · {role}</p>
           </div>
-          <button onClick={onLogout} className="bg-red-50 text-red-600 px-4 py-2 rounded-full border border-red-100 hover:bg-red-100 font-black text-[10px] uppercase tracking-widest transition-all shadow-md active:scale-95">Esci</button>
+          <div className="flex items-center gap-2">
+            {canInstall && <button onClick={onInstall} className="anim-pop bg-yellow-400 text-black px-4 py-2 rounded-full font-black text-[10px] uppercase tracking-widest shadow-md active:scale-95 transition-all">Installa app</button>}
+            <button onClick={onLogout} className="bg-red-50 text-red-600 px-4 py-2 rounded-full border border-red-100 hover:bg-red-100 font-black text-[10px] uppercase tracking-widest transition-all shadow-md active:scale-95">Esci</button>
+          </div>
         </div>
       </header>
 
@@ -2526,7 +2587,13 @@ function Home({ role, sections, badges, onOpen, onLogout, dataError }) {
             Errore di lettura dati: {dataError}. Se hai appena cambiato le regole di Firestore, controlla che siano quelle giuste.
           </div>
         )}
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+        {iosTip && (
+          <div className="anim-rise bg-yellow-50 border-l-4 border-yellow-400 rounded-xl p-4 text-sm font-bold text-slate-700 flex justify-between items-center gap-3">
+            <span>Per installare l'app: tocca <b>Condividi</b> e poi «Aggiungi alla schermata Home».</span>
+            <button onClick={onDismissTip} className="bg-yellow-400 text-black px-4 py-2 rounded-full font-black text-[10px] uppercase active:scale-95 flex-shrink-0">OK</button>
+          </div>
+        )}
+        <div className="stagger grid grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {sections.map((s) => {
             const badge = badges[s.id] || 0;
             return (
@@ -2537,7 +2604,7 @@ function Home({ role, sections, badges, onOpen, onLogout, dataError }) {
               >
                 <div className="flex justify-between items-start">
                   <div className="bg-white/20 p-3 sm:p-4 rounded-2xl"><Icon name={s.icon} size={34} /></div>
-                  {badge > 0 && <span className="bg-red-600 text-white min-w-[2.25rem] h-9 px-2 rounded-full flex items-center justify-center font-black text-sm shadow-lg ring-4 ring-white/30">{badge}</span>}
+                  {badge > 0 && <span key={badge} className="anim-pop bg-red-600 text-white min-w-[2.25rem] h-9 px-2 rounded-full flex items-center justify-center font-black text-sm shadow-lg ring-4 ring-white/30">{badge}</span>}
                 </div>
                 <div>
                   <h2 className="text-xl sm:text-3xl font-black uppercase italic tracking-tighter leading-none">{s.label}</h2>
@@ -2565,6 +2632,14 @@ export default function App() {
   const [meetingItems, setMeetingItems] = useState([]);
   const [deadlines, setDeadlines] = useState([]);
   const [dataError, setDataError] = useState('');
+  const [installEvt, setInstallEvt] = useState(null);
+  const [iosTip, setIosTip] = useState(() => {
+    try {
+      const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+      const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      return ios && !standalone && localStorage.getItem('lucciole-ios-tip') !== '1';
+    } catch { return false; }
+  });
   const today = useToday();
 
   const role = user ? EMAIL_TO_ROLE[(user.email || '').toLowerCase()] || null : null;
@@ -2595,6 +2670,22 @@ export default function App() {
     return () => unsubs.forEach((u) => u());
   }, [role]);
 
+  // PWA: tasto "Installa app" (Android / computer) e suggerimento per iPhone/iPad
+  useEffect(() => {
+    const onPrompt = (e) => { e.preventDefault(); setInstallEvt(e); };
+    const onInstalled = () => setInstallEvt(null);
+    window.addEventListener('beforeinstallprompt', onPrompt);
+    window.addEventListener('appinstalled', onInstalled);
+    return () => { window.removeEventListener('beforeinstallprompt', onPrompt); window.removeEventListener('appinstalled', onInstalled); };
+  }, []);
+  const installApp = async () => {
+    if (!installEvt) return;
+    installEvt.prompt();
+    try { await installEvt.userChoice; } catch { /* ignore */ }
+    setInstallEvt(null);
+  };
+  const dismissIosTip = () => { setIosTip(false); try { localStorage.setItem('lucciole-ios-tip', '1'); } catch { /* ignore */ } };
+
   // Tasto "indietro" del tablet/telefono: dalla sezione torna alla home
   useEffect(() => {
     const onPop = () => setSection(null);
@@ -2616,7 +2707,7 @@ export default function App() {
     if (!email) { setLoginError('Utente non riconosciuto.'); return; }
     try {
       await signInWithEmailAndPassword(auth, email, p);
-    } catch (err) {
+    } catch {
       setLoginError('Accesso fallito. Verifica la password.');
     }
   };
@@ -2629,11 +2720,12 @@ export default function App() {
     economia: deadlines.filter((d) => deadlineStatus(d, today).state !== 'ok').length
   }), [meetingItems, works, checks, deadlines, today]);
 
-  if (loading) return <div className="app-root min-h-screen bg-slate-900 flex items-center justify-center text-white font-black italic">CARICAMENTO...</div>;
+  if (loading) return <div className="app-root boot"><span className="boot-dot"></span><p>Lucciole</p></div>;
 
   if (!user) return (
-    <div className="app-root min-h-screen flex flex-col items-center justify-center p-6 bg-slate-900">
-      <div className="w-full max-w-sm bg-white rounded-[2.5rem] p-10 shadow-2xl space-y-8 animate-modal">
+    <div className="app-root relative overflow-hidden min-h-screen flex flex-col items-center justify-center p-6 bg-slate-900">
+      <Fireflies />
+      <div className="relative w-full max-w-sm bg-white rounded-[2.5rem] p-10 shadow-2xl space-y-8 animate-modal">
         <div className="text-center">
           <h1 className="text-4xl font-black uppercase italic tracking-tighter text-slate-900 leading-none">Lucciole</h1>
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.3em] mt-1">nella Nebbia</p>
@@ -2670,7 +2762,7 @@ export default function App() {
     case 'turni': page = <ShiftsPage isManager={isManager} today={today} onBack={back} />; break;
     case 'checklist': page = <ChecklistPage checks={checks} role={role} isManager={isManager} today={today} onBack={back} />; break;
     case 'economia': page = isManager ? <EconomiaPage deadlines={deadlines} today={today} onBack={back} /> : null; break;
-    default: page = <Home role={role} sections={sections} badges={badges} onOpen={openSection} onLogout={handleLogout} dataError={dataError} />;
+    default: page = <Home role={role} sections={sections} badges={badges} onOpen={openSection} onLogout={handleLogout} dataError={dataError} canInstall={!!installEvt} onInstall={installApp} iosTip={iosTip} onDismissTip={dismissIosTip} />;
   }
-  return <div className="app-root">{page}</div>;
+  return <div key={activeSection || 'home'} className="app-root anim-fade">{page}</div>;
 }
