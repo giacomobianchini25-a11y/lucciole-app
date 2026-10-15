@@ -2,13 +2,31 @@
 <html lang="it">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Lucciole nella Nebbia</title>
+
+    <!-- PWA -->
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" type="image/png" href="icon-192.png" />
+    <link rel="apple-touch-icon" href="icon-512.png" />
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Lucciole" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+
+    <!-- Schermata di avvio: compare subito, prima ancora che l'app sia caricata -->
+    <style>
+      .boot{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.1rem;background:#0f172a}
+      .boot p{margin:0;color:#facc15;font:900 italic 1.7rem/1 system-ui,sans-serif;letter-spacing:-.04em;text-transform:uppercase}
+      .boot-dot{width:14px;height:14px;border-radius:9999px;background:#fde047;box-shadow:0 0 26px 9px rgba(250,204,21,.55);animation:boot-pulse 1.5s ease-in-out infinite}
+      @keyframes boot-pulse{0%,100%{transform:scale(.7);opacity:.55}50%{transform:scale(1.15);opacity:1}}
+    </style>
+
     <script src="https://cdn.tailwindcss.com"></script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div class="boot"><span class="boot-dot"></span><p>Lucciole</p></div></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
