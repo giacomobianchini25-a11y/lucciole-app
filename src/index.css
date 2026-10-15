@@ -1,7 +1,72 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ============ Reattività al tocco ============ */
+html { -webkit-tap-highlight-color: transparent; overscroll-behavior-y: contain; }
+button, a, label, select, summary, input[type="checkbox"] { touch-action: manipulation; } /* niente ritardo sul tocco */
+button { -webkit-user-select: none; user-select: none; }
+
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-@keyframes modalIn { from { opacity: 0; transform: scale(.96) translateY(8px); } to { opacity: 1; transform: none; } }
-.animate-modal { animation: modalIn .18s ease-out; }
+
+:root {
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
+}
+
+/* ============ Animazioni ============
+   Usano solo "transform" e "opacity": vengono eseguite dalla scheda video
+   e restano fluide anche sui tablet più economici. */
+@keyframes anim-fade  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fade-out   { to { opacity: 0; } }
+@keyframes anim-rise  { from { opacity: 0; transform: translate3d(0, 14px, 0) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes anim-slide { from { opacity: 0; transform: translate3d(28px, 0, 0); } to { opacity: 1; transform: none; } }
+@keyframes anim-pop   { 0% { opacity: 0; transform: scale(.4); } 60% { opacity: 1; transform: scale(1.18); } 100% { transform: scale(1); } }
+@keyframes modal-in   { from { opacity: 0; transform: translate3d(0, 18px, 0) scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes modal-out  { to { opacity: 0; transform: translate3d(0, 10px, 0) scale(.97); } }
+
+/* "backwards": dopo l'animazione l'elemento torna libero (hover e tocco continuano a funzionare) */
+.anim-fade  { animation: anim-fade .22s ease-out backwards; }
+.anim-rise  { animation: anim-rise .4s var(--ease-out) backwards; }
+.anim-slide { animation: anim-slide .26s var(--ease-out) backwards; }
+.anim-pop   { animation: anim-pop .4s var(--ease-spring) backwards; }
+
+/* Finestre: entrano e escono */
+.animate-modal   { animation: modal-in .24s var(--ease-out) backwards; }
+.modal-backdrop  { animation: anim-fade .2s ease-out backwards; }
+.is-closing .animate-modal  { animation: modal-out .13s ease-in forwards; }
+.is-closing .modal-backdrop { animation: fade-out .13s ease-in forwards; }
+
+/* Elenchi e griglie: gli elementi entrano uno dopo l'altro */
+.stagger > * { animation: anim-rise .4s var(--ease-out) backwards; }
+.stagger > *:nth-child(2) { animation-delay: 40ms; }
+.stagger > *:nth-child(3) { animation-delay: 80ms; }
+.stagger > *:nth-child(4) { animation-delay: 120ms; }
+.stagger > *:nth-child(5) { animation-delay: 160ms; }
+.stagger > *:nth-child(6) { animation-delay: 200ms; }
+.stagger > *:nth-child(7) { animation-delay: 240ms; }
+.stagger > *:nth-child(8) { animation-delay: 280ms; }
+.stagger > *:nth-child(n+9) { animation-delay: 320ms; }
+
+/* Lucciole che volano nell'intestazione */
+@keyframes firefly-drift { 0%, 100% { transform: translate3d(0, 0, 0); } 50% { transform: translate3d(var(--dx, 14px), var(--dy, -22px), 0); } }
+@keyframes firefly-glow  { 0%, 100% { opacity: .12; } 50% { opacity: .95; } }
+.firefly {
+  position: absolute; width: 6px; height: 6px; border-radius: 9999px;
+  background: #fde047; box-shadow: 0 0 10px 3px rgba(250, 204, 21, .65);
+  animation: firefly-drift var(--t, 7s) ease-in-out infinite var(--d, 0s), firefly-glow var(--g, 3.2s) ease-in-out infinite var(--d, 0s);
+  will-change: transform, opacity;
+}
+
+/* Schermata di caricamento (uguale a quella dentro index.html, così il passaggio non si nota) */
+.boot { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.1rem; background: #0f172a; }
+.boot p { margin: 0; color: #facc15; font: 900 italic 1.7rem/1 system-ui, sans-serif; letter-spacing: -.04em; text-transform: uppercase; }
+.boot-dot { width: 14px; height: 14px; border-radius: 9999px; background: #fde047; box-shadow: 0 0 26px 9px rgba(250, 204, 21, .55); animation: boot-pulse 1.5s ease-in-out infinite; }
+@keyframes boot-pulse { 0%, 100% { transform: scale(.7); opacity: .55; } 50% { transform: scale(1.15); opacity: 1; } }
+
+/* Chi ha attivato "riduci animazioni" nel telefono/tablet: tutto resta fermo */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; animation-delay: 0ms !important; transition-duration: .01ms !important; }
+  .firefly { display: none; }
+}
