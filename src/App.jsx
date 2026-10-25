@@ -1,4 +1,3 @@
-// ============================================================
 //  LUCCIOLE NELLA NEBBIA — App interna del villaggio
 //  Home con sezioni: Lista spesa, Riunione, Lavori e manutenzioni,
 //  Turni, Check-list, Economia (solo admin e superadmin)
@@ -155,18 +154,22 @@ const waNumber = (p) => {
 // ============================================================
 //  ORARI STANDARD E LUL (funzioni di calcolo "pure")
 // ============================================================
-const ABSENCE_CODES = ['F', 'M', 'P']; // Ferie, Malattia, Permesso
-const ABSENCE_LABELS = { F: 'Ferie', M: 'Malattia', P: 'Permesso' };
+// FE = ferie, M = malattia, P = permesso, R = riposo (solo dipendenti fissi).
+// Nei dati salvati in passato le ferie erano "F": vengono lette come "FE".
+const ABSENCE_CODES = ['FE', 'M', 'P', 'R'];
+const normCode = (v) => (v === 'F' ? 'FE' : v);
 
 // ore previste per ciascun giorno della settimana [lun..dom] dall'orario standard
 function scheduleHours(schedule) {
   return [0, 1, 2, 3, 4, 5, 6].map((i) => sumHours(schedule && (schedule[i] || schedule[String(i)])));
 }
 
-// legge una cella del LUL: null = vuota, 'F'/'M'/'P' = assenza, numero = ore, undefined = non valida
-function parseCell(raw) {
-  const s = String(raw === undefined || raw === null ? '' : raw).trim().toUpperCase();
+// legge una cella del LUL: null = vuota, 'FE'/'M'/'P'/'R' = assenza o riposo, numero = ore, undefined = non valida
+// (il riposo R è ammesso solo per i dipendenti fissi)
+function parseCell(raw, allowRest = true) {
+  const s = normCode(String(raw === undefined || raw === null ? '' : raw).trim().toUpperCase());
   if (s === '') return null;
+  if (s === 'R') return allowRest ? 'R' : undefined;
   if (ABSENCE_CODES.includes(s)) return s;
   const n = parseFloat(s.replace(',', '.'));
   if (isNaN(n) || n < 0 || n > 24) return undefined;
@@ -181,7 +184,8 @@ function parseCell(raw) {
  *   Le ore in meno in una giornata si compensano con quelle in più nella stessa settimana.
  * - Dipendente A CHIAMATA: nessun orario fisso. Straordinario solo se è indicata una soglia
  *   settimanale (ore settimanali), altrimenti tutte le ore sono ordinarie.
- * - Assenze F/M/P: coprono le ore previste di quel giorno (non sono ore lavorate, non sono mancanze).
+ * - Assenze FE/M/P e riposo R: coprono le ore previste di quel giorno (non sono ore lavorate, non sono mancanze).
+ * - Giorni lavorati: i giorni con almeno un'ora inserita.
  * - Le settimane a cavallo di due mesi sono calcolate per la sola parte del mese.
  */
 function computeLul(emp, priv, entries, year, month, today) {
@@ -202,12 +206,13 @@ function computeLul(emp, priv, entries, year, month, today) {
   const todayD = startOfDay(today);
   const days = [];
   const weekMap = new Map();
-  const absCount = { F: 0, M: 0, P: 0 };
+  const absCount = { FE: 0, M: 0, P: 0, R: 0 };
+  let daysWorked = 0;
 
   for (let d = 1; d <= dim; d++) {
     const date = new Date(year, month, d);
     const dow = dowMon0(date);
-    const v = entries ? entries[String(d)] : undefined;
+    const v = entries ? normCode(entries[String(d)]) : undefined;
     const filled = v !== undefined && v !== null && v !== '';
     const isAbs = typeof v === 'string' && ABSENCE_CODES.includes(v);
     const worked = filled && !isAbs ? Number(v) || 0 : 0;
@@ -215,6 +220,7 @@ function computeLul(emp, priv, entries, year, month, today) {
     const full = expectedFor(dow);
     const expected = countable && !isAbs ? full : 0;
     if (isAbs) absCount[v] += 1;
+    if (worked > 0) daysWorked += 1;
     days.push({ d, date, dow, v: filled ? v : undefined, filled, isAbs, worked, full, expected, countable });
 
     const wk = toISODate(startOfWeek(date));
@@ -250,6 +256,7 @@ function computeLul(emp, priv, entries, year, month, today) {
     weeklyHours: W,
     absCount,
     totals: {
+      daysWorked,
       worked: r2(workedTotal),
       expected: r2(expectedTotal),
       overtime: r2(overtime),
@@ -400,6 +407,24 @@ function ModalHeader({ title, subtitle, onClose }) {
   );
 }
 
+// Tasto "Chi chiamare": compare nell'intestazione di ogni pagina (non per il cuoco)
+const ContactsCtx = React.createContext(null);
+function ContactsButton({ withLabel = false }) {
+  const open = React.useContext(ContactsCtx);
+  if (!open) return null;
+  return (
+    <button
+      onClick={open}
+      aria-label="Chi chiamare"
+      title="Chi chiamare"
+      className={`bg-white/10 hover:bg-white/20 text-white rounded-full active:scale-95 transition-all flex-shrink-0 flex items-center gap-2 ${withLabel ? 'px-4 py-2' : 'p-3'}`}
+    >
+      <Icon name="phone" size={withLabel ? 16 : 22} />
+      {withLabel && <span className="font-black text-[10px] uppercase tracking-widest">Chi chiamare</span>}
+    </button>
+  );
+}
+
 function PageShell({ title, subtitle, onBack, right, wide = false, children }) {
   return (
     <div className="min-h-screen bg-slate-50 pb-32">
@@ -415,6 +440,7 @@ function PageShell({ title, subtitle, onBack, right, wide = false, children }) {
             {subtitle && <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1 truncate">{subtitle}</p>}
           </div>
           {right}
+          <ContactsButton />
         </div>
       </header>
       <main className={`${wide ? 'max-w-7xl' : 'max-w-5xl'} mx-auto p-4 sm:p-6 space-y-6`}>{children}</main>
@@ -505,8 +531,8 @@ function Fireflies() {
 //  SCRITTURA A MANO (penna del tablet) — salva i tratti come piccolo testo JSON
 // ============================================================
 const INK_W = 1000;
-const INK_H0 = 1100;
-const INK_H_STEP = 600;
+const INK_H0 = 450;      // altezza iniziale del foglio (più piccolo; si allunga col tasto "Allunga foglio")
+const INK_H_STEP = 450;
 const INK_COLORS = [['#0f172a', 'bg-slate-900'], ['#1d4ed8', 'bg-blue-700'], ['#dc2626', 'bg-red-600']];
 const INK_SIZES = [[2.5, 'Sottile'], [4.5, 'Medio'], [9, 'Spesso']];
 const r1 = (n) => Math.round(n * 10) / 10;
@@ -552,7 +578,7 @@ function strokeHit(s, x, y, R) {
 
 function InkCanvas({ strokes, h, onChange, disabled = false }) {
   const canvasRef = useRef(null);
-  const [tool, setTool] = useState('pen'); // pen | eraser | scroll
+  const [tool, setTool] = useState('scroll'); // pen | eraser | scroll — all'apertura parte "Scorri"
   const [color, setColor] = useState(INK_COLORS[0][0]);
   const [size, setSize] = useState(INK_SIZES[1][0]);
   const [onlyPen, setOnlyPen] = useState(false);
@@ -651,7 +677,6 @@ function InkCanvas({ strokes, h, onChange, disabled = false }) {
       <Icon name={icon} size={16} /> {label}
     </button>
   );
-
   return (
     <div className="space-y-3">
       {!disabled && (
@@ -781,7 +806,7 @@ function ShoppingPage({ role, onBack, onLogout }) {
     return () => unsub();
   }, []);
 
-const saveFields = async (ids, values) => {
+  const saveFields = async (ids, values) => {
     setSaving(true);
     try {
       const payload = { updatedAt: new Date().toISOString() };
@@ -830,6 +855,7 @@ const saveFields = async (ids, values) => {
             </button>
           )}
           <h1 className="text-2xl sm:text-3xl font-black uppercase italic tracking-tighter text-yellow-400 leading-none flex-1">Lista spesa</h1>
+          <ContactsButton />
           {!onBack && onLogout && (
             <button onClick={onLogout} className="bg-red-50 text-red-600 px-4 py-2 rounded-full border border-red-100 hover:bg-red-100 font-black text-[10px] uppercase tracking-widest transition-all shadow-md active:scale-95">Esci</button>
           )}
@@ -1591,7 +1617,6 @@ function ChecklistPage({ checks, role, isManager, today, onBack }) {
     </PageShell>
   );
 }
-
 // ============================================================
 //  DIPENDENTI  (anagrafica pubblica + dati riservati agli admin)
 //  employees/{id}         -> nome, ruolo, tipo, orario standard (visibile allo staff, serve ai turni)
@@ -1810,6 +1835,7 @@ function EmployeesTab({ employees, priv }) {
     </div>
   );
 }
+
 // ============================================================
 //  TURNI DELLA SETTIMANA
 //  shifts/{lunedì-della-settimana}  ->  assignments: { [idDipendente]: { 0..6: [{from,to}] } }
@@ -2282,29 +2308,57 @@ function DeadlinesTab({ deadlines, employees, today }) {
 }
 
 // ---------- LUL ----------
-function LulCell({ value, tone, onCommit }) {
-  const show = (v) => (v === undefined || v === null ? '' : String(v).replace('.', ','));
+function LulCell({ value, tone, allowRest, label, onCommit }) {
+  const show = (v) => (v === undefined || v === null ? '' : String(normCode(v)).replace('.', ','));
   const [text, setText] = useState(show(value));
+  const [isFocus, setIsFocus] = useState(false);
   const focused = useRef(false);
+  const skipCommit = useRef(false);
+  const inputRef = useRef(null);
   useEffect(() => { if (!focused.current) setText(show(value)); }, [value]);
+
+  const curValue = value === undefined || value === null ? null : normCode(value);
   const commit = () => {
     focused.current = false;
-    const p = parseCell(text);
+    setIsFocus(false);
+    if (skipCommit.current) { skipCommit.current = false; return; }
+    const p = parseCell(text, allowRest);
     if (p === undefined) { setText(show(value)); return; } // valore non valido: torna come prima
-    const cur = value === undefined ? null : value;
-    if (p === cur) { setText(show(value)); return; }
+    if (p === curValue) { setText(show(value)); return; }
     onCommit(p);
   };
+
+  // tasti rapidi: sulla tastiera numerica del tablet non ci sono le lettere
+  const quick = (p) => {
+    skipCommit.current = true;
+    setText(p === null ? '' : p);
+    if (p !== curValue) onCommit(p);
+    if (inputRef.current) inputRef.current.blur();
+  };
+  const codes = allowRest ? ['FE', 'M', 'P', 'R'] : ['FE', 'M', 'P'];
+
   return (
-    <input
-      value={text}
-      inputMode="decimal"
-      onFocus={(e) => { focused.current = true; e.target.select(); }}
-      onChange={(e) => setText(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-      className={`w-10 h-10 text-center text-xs font-black rounded-lg border outline-none focus:ring-2 focus:ring-slate-900 ${tone}`}
-    />
+    <>
+      <input
+        ref={inputRef}
+        value={text}
+        inputMode="decimal"
+        onFocus={(e) => { focused.current = true; setIsFocus(true); e.target.select(); }}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+        className={`w-10 h-10 text-center text-xs font-black rounded-lg border outline-none focus:ring-2 focus:ring-slate-900 ${tone}`}
+      />
+      {isFocus && (
+        <div className="fixed top-2 inset-x-2 z-[500] mx-auto max-w-xl bg-slate-900 text-white rounded-2xl p-2 shadow-2xl flex items-center gap-2 flex-wrap justify-center" onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()}>
+          <span className="text-[10px] font-black uppercase tracking-wide text-slate-300 px-2">{label}</span>
+          {codes.map((c) => (
+            <button key={c} type="button" onClick={() => quick(c)} className="min-w-[3rem] px-3 py-2 rounded-xl bg-sky-500 text-white font-black text-sm active:scale-95">{c}</button>
+          ))}
+          <button type="button" onClick={() => quick(null)} className="px-3 py-2 rounded-xl bg-white/15 text-white font-black text-xs uppercase active:scale-95">Svuota</button>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -2391,7 +2445,7 @@ function LulTab({ employees, priv, today }) {
     return 'bg-green-100 border-green-300 text-green-900';
   };
 
-  const absText = (c) => ABSENCE_CODES.filter((k) => c.absCount[k]).map((k) => `${k}${c.absCount[k]}`).join(' ') || '—';
+  const absText = (c) => ABSENCE_CODES.filter((k) => c.absCount[k]).map((k) => `${k} ${c.absCount[k]}`).join(' · ') || '—';
   const dayNums = Array.from({ length: dim }, (_, i) => i + 1);
   const dayInfo = dayNums.map((d) => { const dt = new Date(year, month, d); return { d, dow: dowMon0(dt) }; });
 
@@ -2418,7 +2472,7 @@ function LulTab({ employees, priv, today }) {
             <span className="px-3 py-1 rounded-lg bg-green-100 text-green-900 border border-green-300">= previsto</span>
             <span className="px-3 py-1 rounded-lg bg-orange-100 text-orange-900 border border-orange-300">▲ più del previsto</span>
             <span className="px-3 py-1 rounded-lg bg-yellow-100 text-yellow-900 border border-yellow-300">▼ meno del previsto</span>
-            <span className="px-3 py-1 rounded-lg bg-sky-100 text-sky-800 border border-sky-300">F ferie · M malattia · P permesso</span>
+            <span className="px-3 py-1 rounded-lg bg-sky-100 text-sky-800 border border-sky-300">FE ferie · M malattia · P permesso · R riposo (solo fissi)</span>
             <span className="px-3 py-1 rounded-lg bg-indigo-50 text-indigo-900 border border-indigo-200">a chiamata</span>
           </div>
 
@@ -2430,7 +2484,8 @@ function LulTab({ employees, priv, today }) {
                   {dayInfo.map(({ d, dow }) => (
                     <th key={d} className={`p-1 text-[10px] font-black ${dow >= 5 ? 'bg-slate-700' : ''}`}>{d}<br /><span className="opacity-60">{DAYS_SHORT[dow][0]}</span></th>
                   ))}
-                  <th className="p-2 text-[10px] font-black uppercase">Tot</th>
+                  <th className="p-2 text-[10px] font-black uppercase">Ore</th>
+                  <th className="p-2 text-[10px] font-black uppercase">Giorni</th>
                 </tr>
               </thead>
               <tbody>
@@ -2442,16 +2497,17 @@ function LulTab({ employees, priv, today }) {
                     </td>
                     {calc.days.map((day) => (
                       <td key={day.d} className="p-0.5">
-                        <LulCell value={day.v} tone={tone(calc, day)} onCommit={(v) => commit(emp.id, day.d, v)} />
+                        <LulCell value={day.v} tone={tone(calc, day)} allowRest={!calc.isCall} label={`${empName(emp)} · ${day.d} ${MONTHS[month]}`} onCommit={(v) => commit(emp.id, day.d, v)} />
                       </td>
                     ))}
                     <td className="p-2 text-center font-black text-slate-900">{fmtNum(calc.totals.worked)}</td>
+                    <td className="p-2 text-center font-black text-slate-900">{calc.totals.daysWorked}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <p className="text-[10px] font-bold uppercase text-slate-400 tracking-widest">Scrivi le ore del giorno (es. 8 oppure 7,5) oppure F / M / P. Si salva da solo quando esci dalla casella.</p>
+          <p className="text-[10px] font-bold uppercase text-slate-400 tracking-widest">Scrivi le ore del giorno (es. 8 oppure 7,5) oppure usa i tasti FE / M / P / R che compaiono in alto. Si salva da solo quando esci dalla casella.</p>
 
           <div className="overflow-x-auto bg-white rounded-3xl shadow-xl border-4 border-white">
             <table className="w-full border-collapse text-sm min-w-[680px]">
@@ -2461,10 +2517,11 @@ function LulTab({ employees, priv, today }) {
                   <th className="p-3">Contratto/sett.</th>
                   <th className="p-3">Previste</th>
                   <th className="p-3">Lavorate</th>
+                  <th className="p-3">Giorni</th>
                   <th className="p-3">Ordinarie</th>
                   <th className="p-3 text-orange-600">Straordinario</th>
                   <th className="p-3">Mancanti</th>
-                  <th className="p-3">Assenze</th>
+                  <th className="p-3">Assenze / riposi</th>
                 </tr>
               </thead>
               <tbody>
@@ -2474,6 +2531,7 @@ function LulTab({ employees, priv, today }) {
                     <td className="p-3 font-bold text-slate-500">{calc.weeklyHours ? fmtNum(calc.weeklyHours) : '—'}</td>
                     <td className="p-3 font-bold text-slate-500">{calc.isCall || calc.noBaseline ? '—' : fmtNum(calc.totals.expected)}</td>
                     <td className="p-3 font-black text-slate-900">{fmtNum(calc.totals.worked)}</td>
+                    <td className="p-3 font-black text-slate-900">{calc.totals.daysWorked}</td>
                     <td className="p-3 font-bold text-slate-700">{calc.noBaseline ? '—' : fmtNum(calc.totals.ordinary)}</td>
                     <td className={`p-3 font-black ${calc.totals.overtime > 0 ? 'text-orange-600' : 'text-slate-300'}`}>{calc.noBaseline ? '—' : fmtNum(calc.totals.overtime)}</td>
                     <td className="p-3 font-bold text-slate-500">{calc.isCall || calc.noBaseline ? '—' : fmtNum(calc.totals.deficit)}</td>
@@ -2481,13 +2539,13 @@ function LulTab({ employees, priv, today }) {
                   </tr>
                 ))}
                 {rows.some((r) => r.calc.noBaseline) && (
-                  <tr><td colSpan={8} className="p-3 text-xs font-bold text-orange-700 bg-orange-50">Per i dipendenti con «—» imposta orario standard o ore settimanali nella scheda Dipendenti, per calcolare gli straordinari.</td></tr>
+                  <tr><td colSpan={9} className="p-3 text-xs font-bold text-orange-700 bg-orange-50">Per i dipendenti con «—» imposta orario standard o ore settimanali nella scheda Dipendenti, per calcolare gli straordinari.</td></tr>
                 )}
               </tbody>
             </table>
           </div>
           <p className="text-xs font-medium text-slate-400 leading-relaxed">
-            Come si calcola: per ogni settimana (lun–dom) le ore lavorate oltre a quelle previste dall'orario standard sono straordinario; le ore in meno di un giorno si compensano con quelle in più della stessa settimana. Ferie, malattia e permessi coprono le ore previste del giorno. Per gli «a chiamata» lo straordinario scatta solo se hai indicato una soglia settimanale. Le settimane a cavallo di due mesi sono calcolate per la sola parte del mese. È un supporto interno: conferma i criteri con il consulente del lavoro.
+            Come si calcola: per ogni settimana (lun–dom) le ore lavorate oltre a quelle previste dall'orario standard sono straordinario; le ore in meno di un giorno si compensano con quelle in più della stessa settimana. Ferie, malattia, permessi e riposi coprono le ore previste del giorno. «Giorni» conta i giorni con almeno un'ora lavorata. Per gli «a chiamata» lo straordinario scatta solo se hai indicato una soglia settimanale. Le settimane a cavallo di due mesi sono calcolate per la sola parte del mese. È un supporto interno: conferma i criteri con il consulente del lavoro.
           </p>
         </>
       )}
@@ -2496,13 +2554,13 @@ function LulTab({ employees, priv, today }) {
 
       <PrintSheet landscape>
         <h1>LUL — {monthLabel}</h1>
-        <p>Lucciole nella Nebbia · ore lavorate per giorno · stampato il {fmtDateIT(new Date())}</p>
         <table>
           <thead>
             <tr>
               <th className="l">Dipendente</th>
               {dayInfo.map(({ d, dow }) => <th key={d} className={dow >= 5 ? 'we' : ''}>{d}<br />{DAYS_SHORT[dow][0]}</th>)}
-              <th>Tot</th>
+              <th>Ore</th>
+              <th>Giorni</th>
             </tr>
           </thead>
           <tbody>
@@ -2511,31 +2569,11 @@ function LulTab({ employees, priv, today }) {
                 <td className="l"><b>{empName(emp)}</b></td>
                 {calc.days.map((day) => <td key={day.d} className={day.dow >= 5 ? 'we' : ''}>{day.v === undefined ? '' : String(day.v).replace('.', ',')}</td>)}
                 <td><b>{fmtNum(calc.totals.worked)}</b></td>
+                <td><b>{calc.totals.daysWorked}</b></td>
               </tr>
             ))}
           </tbody>
         </table>
-        <h2>Riepilogo</h2>
-        <table>
-          <thead>
-            <tr><th className="l">Dipendente</th><th>Contratto/sett.</th><th>Previste</th><th>Lavorate</th><th>Ordinarie</th><th>Straordinario</th><th>Mancanti</th><th>Assenze</th></tr>
-          </thead>
-          <tbody>
-            {rows.map(({ emp, calc }) => (
-              <tr key={emp.id}>
-                <td className="l"><b>{empName(emp)}</b> {emp.role ? `(${emp.role})` : ''}</td>
-                <td>{calc.weeklyHours ? fmtNum(calc.weeklyHours) : '—'}</td>
-                <td>{calc.isCall || calc.noBaseline ? '—' : fmtNum(calc.totals.expected)}</td>
-                <td>{fmtNum(calc.totals.worked)}</td>
-                <td>{calc.noBaseline ? '—' : fmtNum(calc.totals.ordinary)}</td>
-                <td className="ot">{calc.noBaseline ? '—' : fmtNum(calc.totals.overtime)}</td>
-                <td>{calc.isCall || calc.noBaseline ? '—' : fmtNum(calc.totals.deficit)}</td>
-                <td>{absText(calc)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <p style={{ marginTop: '4mm' }}>F = ferie · M = malattia · P = permesso. Straordinario calcolato per settimana (lun–dom) rispetto all'orario standard.</p>
       </PrintSheet>
     </div>
   );
@@ -2559,6 +2597,162 @@ function EconomiaPage({ deadlines, today, onBack }) {
       {tab === 'lul' && <LulTab employees={employees} priv={priv} today={today} />}
     </PageShell>
   );
+}// ============================================================
+//  CHI CHIAMARE (fornitori e contatti utili)
+//  Lo vede tutto lo staff (non il cuoco); lo modificano solo admin e superadmin.
+// ============================================================
+const CONTACT_CATEGORIES = ['Idraulico', 'Elettricista', 'Fabbro', 'Manutenzione', 'Fornitori alimentari', 'Bevande', 'Pulizie e lavanderia', 'Emergenze', 'Altro'];
+const telHref = (p) => `tel:${String(p || '').replace(/[^\d+]/g, '')}`;
+
+function ContactEditModal({ initial, onClose }) {
+  const [name, setName] = useState(initial ? initial.name || '' : '');
+  const [category, setCategory] = useState(initial ? initial.category || '' : '');
+  const [person, setPerson] = useState(initial ? initial.person || '' : '');
+  const [phone, setPhone] = useState(initial ? initial.phone || '' : '');
+  const [phone2, setPhone2] = useState(initial ? initial.phone2 || '' : '');
+  const [email, setEmail] = useState(initial ? initial.email || '' : '');
+  const [address, setAddress] = useState(initial ? initial.address || '' : '');
+  const [code, setCode] = useState(initial ? initial.code || '' : '');
+  const [note, setNote] = useState(initial ? initial.note || '' : '');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setBusy(true);
+    try {
+      const data = {
+        name: name.trim(), category: category.trim() || 'Altro', person: person.trim(),
+        phone: phone.trim(), phone2: phone2.trim(), email: email.trim(), address: address.trim(),
+        code: code.trim(), note: note.trim(), updatedAt: new Date().toISOString()
+      };
+      if (initial) await updateDoc(doc(db, 'contacts', initial.id), data);
+      else await addDoc(collection(db, 'contacts'), { ...data, createdAt: new Date().toISOString() });
+      onClose();
+    } catch (err) { alert('Errore: ' + err.message); setBusy(false); }
+  };
+
+  return (
+    <Modal onClose={onClose} z="z-[450]">
+      <ModalHeader title={initial ? 'Modifica contatto' : 'Nuovo contatto'} subtitle="Chi chiamare" onClose={onClose} />
+      <form onSubmit={submit} className="p-5 sm:p-6 space-y-5 overflow-y-auto">
+        <div>
+          <label className={LABEL}>Nome / ditta</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} required placeholder="Es. Mario Rossi idraulico" className={INPUT} />
+        </div>
+        <div>
+          <label className={LABEL}>Categoria</label>
+          <input value={category} onChange={(e) => setCategory(e.target.value)} list="contact-categories" placeholder="Es. Idraulico" className={INPUT} />
+          <datalist id="contact-categories">{CONTACT_CATEGORIES.map((c) => <option key={c} value={c} />)}</datalist>
+        </div>
+        <div>
+          <label className={LABEL}>Referente (facoltativo)</label>
+          <input value={person} onChange={(e) => setPerson(e.target.value)} placeholder="Es. Signor Mario / Ufficio ordini" className={INPUT} />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className={LABEL}>Telefono</label>
+            <input type="tel" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Es. 333 1234567" className={INPUT} />
+          </div>
+          <div>
+            <label className={LABEL}>Secondo telefono</label>
+            <input type="tel" inputMode="tel" value={phone2} onChange={(e) => setPhone2(e.target.value)} placeholder="Es. ufficio / emergenze" className={INPUT} />
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className={LABEL}>Email</label>
+            <input type="email" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nome@ditta.it" className={INPUT} />
+          </div>
+          <div>
+            <label className={LABEL}>Codice cliente</label>
+            <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Es. numero cliente / contratto" className={INPUT} />
+          </div>
+        </div>
+        <div>
+          <label className={LABEL}>Indirizzo / zona</label>
+          <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Es. Via Roma 12, Rimini" className={INPUT} />
+        </div>
+        <div>
+          <label className={LABEL}>Note (facoltativo)</label>
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Es. reperibile anche la sera / chiamare per perdite d'acqua" className={`${INPUT} resize-none`}></textarea>
+        </div>
+        <button type="submit" disabled={busy} className={BTN_PRIMARY}>{initial ? 'Salva modifiche' : 'Aggiungi contatto'}</button>
+      </form>
+    </Modal>
+  );
+}
+
+function ContactsModal({ contacts, isManager, onClose }) {
+  const [q, setQ] = useState('');
+  const [editing, setEditing] = useState(null);
+
+  const groups = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const list = contacts.filter((c) => !needle || [c.name, c.category, c.person, c.note, c.phone, c.phone2, c.email, c.address, c.code].some((v) => String(v || '').toLowerCase().includes(needle)));
+    const map = new Map();
+    list.forEach((c) => { const k = c.category || 'Altro'; if (!map.has(k)) map.set(k, []); map.get(k).push(c); });
+    return [...map.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0], 'it'))
+      .map(([cat, items]) => [cat, items.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'it'))]);
+  }, [contacts, q]);
+
+  const remove = async (c) => {
+    if (!confirm(`Eliminare «${c.name}»?`)) return;
+    try { await deleteDoc(doc(db, 'contacts', c.id)); } catch (err) { alert('Errore: ' + err.message); }
+  };
+
+  return (
+    <Modal onClose={onClose} size="max-w-xl">
+      <ModalHeader title="Chi chiamare" subtitle="Fornitori e contatti utili" onClose={onClose} />
+      <div className="p-4 sm:p-5 space-y-4 overflow-y-auto">
+        <div className="flex gap-2">
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cerca (es. idraulico)" className={`${INPUT_SM} flex-1`} />
+          {isManager && (
+            <button onClick={() => setEditing('new')} className="bg-slate-900 text-white px-4 rounded-xl font-black text-xs uppercase flex items-center gap-2 active:scale-95 flex-shrink-0"><Icon name="plus" size={16} /> Nuovo</button>
+          )}
+        </div>
+
+        {contacts.length === 0 && <Empty>{isManager ? 'Nessun contatto: premi «Nuovo»' : 'Nessun contatto inserito'}</Empty>}
+        {contacts.length > 0 && groups.length === 0 && <Empty>Nessun risultato</Empty>}
+
+        {groups.map(([cat, items]) => (
+          <div key={cat} className="space-y-2">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">{cat}</p>
+            {items.map((c) => (
+              <div key={c.id} className="bg-slate-50 rounded-2xl p-4 flex items-start gap-3">
+                <div className="flex-1 min-w-0 space-y-1">
+                  <p className="font-black text-slate-900 leading-tight">{c.name}</p>
+                  {c.person && <p className="text-xs font-black uppercase tracking-wide text-slate-500">{c.person}</p>}
+                  {c.phone && <p className="text-sm font-bold text-slate-600">{c.phone}</p>}
+                  {c.phone2 && <p className="text-sm font-bold text-slate-600">{c.phone2}</p>}
+                  {c.email && <a href={`mailto:${c.email}`} className="block text-sm font-bold text-blue-700 truncate">{c.email}</a>}
+                  {c.address && <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.address)}`} target="_blank" rel="noopener noreferrer" className="block text-sm font-bold text-slate-500 underline decoration-dotted">{c.address}</a>}
+                  {c.code && <p className="text-[11px] font-black uppercase tracking-wide text-slate-400">Cod. cliente: {c.code}</p>}
+                  {c.note && <p className="text-xs font-medium text-slate-400 whitespace-pre-wrap">{c.note}</p>}
+                </div>
+                <div className="flex flex-col gap-2 flex-shrink-0">
+                  {[c.phone, c.phone2].filter(Boolean).map((ph, i) => (
+                    <div key={i} className="flex gap-2">
+                      <a href={telHref(ph)} aria-label={`Chiama ${c.name} ${ph}`} className="bg-green-600 text-white p-3 rounded-full active:scale-95"><Icon name="phone" size={20} /></a>
+                      <a href={`https://wa.me/${waNumber(ph)}`} target="_blank" rel="noopener noreferrer" aria-label={`WhatsApp a ${c.name} ${ph}`} className="bg-emerald-100 text-emerald-700 p-3 rounded-full active:scale-95"><Icon name="whatsapp" size={20} /></a>
+                    </div>
+                  ))}
+                </div>
+                {isManager && (
+                  <div className="flex flex-col gap-1 flex-shrink-0">
+                    <button onClick={() => setEditing(c)} aria-label="Modifica" className="p-2 rounded-xl bg-white border border-slate-200 text-slate-600 active:scale-95"><Icon name="pencil" size={14} /></button>
+                    <button onClick={() => remove(c)} aria-label="Elimina" className="p-2 rounded-xl bg-red-50 border border-red-100 text-red-600 active:scale-95"><Icon name="trash" size={14} /></button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+      {editing && <ContactEditModal initial={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
+    </Modal>
+  );
 }
 
 // ============================================================
@@ -2575,7 +2769,8 @@ function Home({ role, sections, badges, onOpen, onLogout, dataError, canInstall,
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">nella Nebbia · {role}</p>
           </div>
           <div className="flex items-center gap-2">
-            {canInstall && <button onClick={onInstall} className="anim-pop bg-yellow-400 text-black px-4 py-2 rounded-full font-black text-[10px] uppercase tracking-widest shadow-md active:scale-95 transition-all">Installa app</button>}
+            <ContactsButton withLabel />
+            {canInstall &&<button onClick={onInstall} className="anim-pop bg-yellow-400 text-black px-4 py-2 rounded-full font-black text-[10px] uppercase tracking-widest shadow-md active:scale-95 transition-all">Installa app</button>}
             <button onClick={onLogout} className="bg-red-50 text-red-600 px-4 py-2 rounded-full border border-red-100 hover:bg-red-100 font-black text-[10px] uppercase tracking-widest transition-all shadow-md active:scale-95">Esci</button>
           </div>
         </div>
@@ -2631,6 +2826,8 @@ export default function App() {
   const [checks, setChecks] = useState([]);
   const [meetingItems, setMeetingItems] = useState([]);
   const [deadlines, setDeadlines] = useState([]);
+  const [contacts, setContacts] = useState([]);
+  const [showContacts, setShowContacts] = useState(false);
   const [dataError, setDataError] = useState('');
   const [installEvt, setInstallEvt] = useState(null);
   const [iosTip, setIosTip] = useState(() => {
@@ -2656,7 +2853,7 @@ export default function App() {
   // Dati condivisi: ogni ruolo legge solo ciò che può vedere
   useEffect(() => {
     setDataError('');
-    if (!role) { setWorks([]); setChecks([]); setMeetingItems([]); setDeadlines([]); return undefined; }
+    if (!role) { setWorks([]); setChecks([]); setMeetingItems([]); setDeadlines([]); setContacts([]); setShowContacts(false); return undefined; }
     const unsubs = [];
     const sub = (name, setter) => {
       unsubs.push(onSnapshot(
@@ -2665,7 +2862,7 @@ export default function App() {
         (e) => { console.error(name, e); setDataError(`${name}: ${e.message}`); }
       ));
     };
-    if (STAFF.includes(role)) { sub('works', setWorks); sub('checks', setChecks); sub('meetingItems', setMeetingItems); }
+    if (STAFF.includes(role)) { sub('works', setWorks); sub('checks', setChecks); sub('meetingItems', setMeetingItems); sub('contacts', setContacts); }
     if (MANAGERS.includes(role)) sub('deadlines', setDeadlines);
     return () => unsubs.forEach((u) => u());
   }, [role]);
@@ -2693,6 +2890,7 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
   const openSection = (id) => { setSection(id); window.history.pushState({ section: id }, ''); };
+  const openContacts = useCallback(() => setShowContacts(true), []);
   const goHome = () => {
     if (window.history.state && window.history.state.section) window.history.back();
     else setSection(null);
@@ -2764,5 +2962,11 @@ export default function App() {
     case 'economia': page = isManager ? <EconomiaPage deadlines={deadlines} today={today} onBack={back} /> : null; break;
     default: page = <Home role={role} sections={sections} badges={badges} onOpen={openSection} onLogout={handleLogout} dataError={dataError} canInstall={!!installEvt} onInstall={installApp} iosTip={iosTip} onDismissTip={dismissIosTip} />;
   }
-  return <div key={activeSection || 'home'} className="app-root anim-fade">{page}</div>;
+  const canContacts = STAFF.includes(role); // tutti tranne il cuoco
+  return (
+    <ContactsCtx.Provider value={canContacts ? openContacts : null}>
+      <div key={activeSection || 'home'} className="app-root anim-fade">{page}</div>
+      {canContacts && showContacts && <ContactsModal contacts={contacts} isManager={isManager} onClose={() => setShowContacts(false)} />}
+    </ContactsCtx.Provider>
+  );
 }
