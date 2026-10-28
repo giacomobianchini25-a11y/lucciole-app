@@ -1,3 +1,4 @@
+// ============================================================
 //  LUCCIOLE NELLA NEBBIA — App interna del villaggio
 //  Home con sezioni: Lista spesa, Riunione, Lavori e manutenzioni,
 //  Turni, Check-list, Economia (solo admin e superadmin)
@@ -32,7 +33,7 @@ import {
   Clock, Plus, X, Trash2, Pencil, ClipboardList, Save, CheckSquare, CheckCircle2,
   Undo2, Users, CalendarDays, Wrench, ClipboardCheck, Wallet, Coffee, PenTool,
   Eraser, ArrowLeft, Printer, MessageCircle, Copy, History, Hand, ShoppingCart,
-  Calculator, Bell, UserPlus, FileText, Sun, Home as HomeIcon, Phone, RefreshCw
+  Calculator, Bell, UserPlus, FileText, Sun, Home as HomeIcon, Phone, RefreshCw, ChevronUp, ChevronDown
 } from 'lucide-react';
 
 const ICON_MAP = {
@@ -45,7 +46,8 @@ const ICON_MAP = {
   'pen': PenTool, 'eraser': Eraser, 'back': ArrowLeft, 'printer': Printer,
   'whatsapp': MessageCircle, 'copy': Copy, 'history': History, 'hand': Hand,
   'cart': ShoppingCart, 'calculator': Calculator, 'bell': Bell, 'user-plus': UserPlus,
-  'file-text': FileText, 'sun': Sun, 'home': HomeIcon, 'phone': Phone, 'refresh': RefreshCw
+  'file-text': FileText, 'sun': Sun, 'home': HomeIcon, 'phone': Phone, 'refresh': RefreshCw,
+  'chevron-up': ChevronUp, 'chevron-down': ChevronDown
 };
 
 const Icon = ({ name, size = 20, className = '', strokeWidth = 2.5 }) => {
@@ -677,6 +679,7 @@ function InkCanvas({ strokes, h, onChange, disabled = false }) {
       <Icon name={icon} size={16} /> {label}
     </button>
   );
+
   return (
     <div className="space-y-3">
       {!disabled && (
@@ -743,7 +746,6 @@ function InkCanvas({ strokes, h, onChange, disabled = false }) {
     </div>
   );
 }
-
 // ============================================================
 //  LISTA SPESA  (stessa logica di prima + tab COLAZIONE)
 // ============================================================
@@ -1071,7 +1073,9 @@ function MeetingPage({ items, role, onBack }) {
   const [newTitle, setNewTitle] = useState('');
   const [selectedId, setSelectedId] = useState(null);
 
-  const sorted = useMemo(() => [...items].sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')), [items]);
+  // ordine scelto con le frecce (campo "order"); i punti vecchi senza "order" restano in ordine di creazione
+  const sortKey = (i) => (typeof i.order === 'number' ? i.order : Date.parse(i.createdAt) || 0);
+  const sorted = useMemo(() => [...items].sort((a, b) => sortKey(a) - sortKey(b) || (a.createdAt || '').localeCompare(b.createdAt || '')), [items]);
   const openCount = sorted.filter((i) => !i.done).length;
   const doneCount = sorted.length - openCount;
   const list = sorted.filter((i) => (filter === 'open' ? !i.done : filter === 'done' ? i.done : true));
@@ -1084,6 +1088,7 @@ function MeetingPage({ items, role, onBack }) {
     try {
       const ref = await addDoc(collection(db, 'meetingItems'), {
         title: t, done: false, notes: '', hasNotes: false, hasInk: false,
+        order: sorted.reduce((m, i) => Math.max(m, sortKey(i)), 0) + 1000, // in fondo alla lista
         createdAt: new Date().toISOString(), createdBy: role
       });
       setNewTitle('');
@@ -1094,6 +1099,25 @@ function MeetingPage({ items, role, onBack }) {
   const toggle = async (it) => {
     try { buzz(); await updateDoc(doc(db, 'meetingItems', it.id), { done: !it.done, updatedAt: new Date().toISOString() }); }
     catch (err) { alert('Errore: ' + err.message); }
+  };
+
+  // sposta un punto su (-1) o giù (+1) rispetto a quelli che vedi nella lista
+  const move = async (it, dir) => {
+    const idx = list.findIndex((x) => x.id === it.id);
+    const other = list[idx + dir];
+    if (idx < 0 || !other) return;
+    const arr = [...sorted];
+    const a = arr.findIndex((x) => x.id === it.id);
+    const b = arr.findIndex((x) => x.id === other.id);
+    [arr[a], arr[b]] = [arr[b], arr[a]];
+    try {
+      const batch = writeBatch(db);
+      let n = 0;
+      arr.forEach((x, i) => { const o = (i + 1) * 1000; if (x.order !== o) { batch.update(doc(db, 'meetingItems', x.id), { order: o }); n += 1; } });
+      if (!n) return;
+      buzz();
+      await batch.commit();
+    } catch (err) { alert('Errore: ' + err.message); }
   };
 
   const clearDone = async () => {
@@ -1122,7 +1146,7 @@ function MeetingPage({ items, role, onBack }) {
         <Empty>{filter === 'done' ? 'Nessun punto completato' : 'Nessun punto. Aggiungine uno!'}</Empty>
       ) : (
         <div className="stagger space-y-3">
-          {list.map((it) => (
+          {list.map((it, idx) => (
             <div
               key={it.id}
               className={`flex items-center gap-3 bg-white rounded-3xl p-3 shadow-md border-4 transition-all ${selectedId === it.id ? 'border-purple-600' : 'border-white'}`}
@@ -1141,7 +1165,10 @@ function MeetingPage({ items, role, onBack }) {
                   {it.hasInk && <Icon name="pen" size={14} />}
                 </div>
               </button>
-              <Icon name="chevron-right" size={20} className="text-slate-300 flex-shrink-0" />
+              <div className="flex flex-col gap-1 flex-shrink-0">
+                <button onClick={() => move(it, -1)} disabled={idx === 0} aria-label="Sposta su" className="w-10 h-10 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center active:scale-90 disabled:opacity-25 transition-all"><Icon name="chevron-up" size={22} strokeWidth={3} /></button>
+                <button onClick={() => move(it, 1)} disabled={idx === list.length - 1} aria-label="Sposta giù" className="w-10 h-10 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center active:scale-90 disabled:opacity-25 transition-all"><Icon name="chevron-down" size={22} strokeWidth={3} /></button>
+              </div>
             </div>
           ))}
         </div>
@@ -1617,6 +1644,7 @@ function ChecklistPage({ checks, role, isManager, today, onBack }) {
     </PageShell>
   );
 }
+
 // ============================================================
 //  DIPENDENTI  (anagrafica pubblica + dati riservati agli admin)
 //  employees/{id}         -> nome, ruolo, tipo, orario standard (visibile allo staff, serve ai turni)
@@ -1835,7 +1863,6 @@ function EmployeesTab({ employees, priv }) {
     </div>
   );
 }
-
 // ============================================================
 //  TURNI DELLA SETTIMANA
 //  shifts/{lunedì-della-settimana}  ->  assignments: { [idDipendente]: { 0..6: [{from,to}] } }
@@ -2597,7 +2624,9 @@ function EconomiaPage({ deadlines, today, onBack }) {
       {tab === 'lul' && <LulTab employees={employees} priv={priv} today={today} />}
     </PageShell>
   );
-}// ============================================================
+}
+
+// ============================================================
 //  CHI CHIAMARE (fornitori e contatti utili)
 //  Lo vede tutto lo staff (non il cuoco); lo modificano solo admin e superadmin.
 // ============================================================
