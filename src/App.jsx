@@ -1644,7 +1644,6 @@ function ChecklistPage({ checks, role, isManager, today, onBack }) {
     </PageShell>
   );
 }
-
 // ============================================================
 //  DIPENDENTI  (anagrafica pubblica + dati riservati agli admin)
 //  employees/{id}         -> nome, ruolo, tipo, orario standard (visibile allo staff, serve ai turni)
@@ -1863,6 +1862,7 @@ function EmployeesTab({ employees, priv }) {
     </div>
   );
 }
+
 // ============================================================
 //  TURNI DELLA SETTIMANA
 //  shifts/{lunedì-della-settimana}  ->  assignments: { [idDipendente]: { 0..6: [{from,to}] } }
@@ -2187,9 +2187,7 @@ function ShiftsPage({ isManager, today, onBack }) {
       </PrintSheet>
     </PageShell>
   );
-}
-
-// ============================================================
+}// ============================================================
 //  ECONOMIA  (solo admin e superadmin)
 //  - Scadenze con promemoria
 //  - Dipendenti
@@ -2364,6 +2362,29 @@ function LulCell({ value, tone, allowRest, label, onCommit }) {
   };
   const codes = allowRest ? ['FE', 'M', 'P', 'R'] : ['FE', 'M', 'P'];
 
+  // Tastiera: Tab / frecce destra-sinistra = casella accanto (giorno dopo / prima), frecce su-giù = altro dipendente
+  const showCell = (el) => { try { el.scrollIntoView({ block: 'nearest', inline: 'center' }); } catch { /* ignore */ } };
+  const onKey = (e) => {
+    if (e.key === 'Enter') { e.currentTarget.blur(); return; }
+    if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey) { requestAnimationFrame(() => { const a = document.activeElement; if (a && a.dataset && a.dataset.lul) showCell(a); }); return; }
+    if (e.key === 'Tab' && e.shiftKey) { requestAnimationFrame(() => { const a = document.activeElement; if (a && a.dataset && a.dataset.lul) showCell(a); }); return; }
+    if (!['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+    const input = e.currentTarget;
+    const tr = input.closest('tr');
+    const table = input.closest('table');
+    if (!tr || !table) return;
+    const rowCells = (r) => (r ? [...r.querySelectorAll('input[data-lul]')] : []);
+    const cells = rowCells(tr);
+    const i = cells.indexOf(input);
+    let target = null;
+    if (e.key === 'ArrowRight') target = cells[i + 1] || rowCells(tr.nextElementSibling)[0];
+    else if (e.key === 'ArrowLeft') target = cells[i - 1] || rowCells(tr.previousElementSibling).slice(-1)[0];
+    else if (e.key === 'ArrowDown') target = rowCells(tr.nextElementSibling)[i];
+    else target = rowCells(tr.previousElementSibling)[i];
+    e.preventDefault();
+    if (target) { target.focus(); showCell(target); }
+  };
+
   return (
     <>
       <input
@@ -2373,16 +2394,17 @@ function LulCell({ value, tone, allowRest, label, onCommit }) {
         onFocus={(e) => { focused.current = true; setIsFocus(true); e.target.select(); }}
         onChange={(e) => setText(e.target.value)}
         onBlur={commit}
-        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+        onKeyDown={onKey}
+        data-lul="1"
         className={`w-10 h-10 text-center text-xs font-black rounded-lg border outline-none focus:ring-2 focus:ring-slate-900 ${tone}`}
       />
       {isFocus && (
         <div className="fixed top-2 inset-x-2 z-[500] mx-auto max-w-xl bg-slate-900 text-white rounded-2xl p-2 shadow-2xl flex items-center gap-2 flex-wrap justify-center" onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()}>
           <span className="text-[10px] font-black uppercase tracking-wide text-slate-300 px-2">{label}</span>
           {codes.map((c) => (
-            <button key={c} type="button" onClick={() => quick(c)} className="min-w-[3rem] px-3 py-2 rounded-xl bg-sky-500 text-white font-black text-sm active:scale-95">{c}</button>
+            <button key={c} type="button" tabIndex={-1} onClick={() => quick(c)} className="min-w-[3rem] px-3 py-2 rounded-xl bg-sky-500 text-white font-black text-sm active:scale-95">{c}</button>
           ))}
-          <button type="button" onClick={() => quick(null)} className="px-3 py-2 rounded-xl bg-white/15 text-white font-black text-xs uppercase active:scale-95">Svuota</button>
+          <button type="button" tabIndex={-1} onClick={() => quick(null)} className="px-3 py-2 rounded-xl bg-white/15 text-white font-black text-xs uppercase active:scale-95">Svuota</button>
         </div>
       )}
     </>
