@@ -291,10 +291,42 @@ function checkNextDue(c) {
   }
 }
 
+// Periodo in cui il controllo è attivo (es. piscina dal 01/06 al 15/08). Vuoto = sempre attivo.
+// Con "ogni anno" il periodo si ripete (anche a cavallo d'anno, es. 01/11 - 15/03).
+function seasonInfo(c, today) {
+  const from = c.activeFrom;
+  const to = c.activeTo;
+  if (!from && !to) return { active: true };
+  const t = startOfDay(today);
+  if (c.seasonYearly && from && to) {
+    const [fm, fd] = from.slice(5).split('-').map(Number);
+    const [tm, td] = to.slice(5).split('-').map(Number);
+    const y = t.getFullYear();
+    const wins = [y - 1, y, y + 1].map((yy) => ({
+      start: new Date(yy, fm - 1, fd),
+      end: new Date(fm * 100 + fd <= tm * 100 + td ? yy : yy + 1, tm - 1, td)
+    }));
+    const cur = wins.find((w) => t >= w.start && t <= w.end);
+    if (cur) return { active: true, start: cur.start, end: cur.end };
+    return { active: false, nextStart: (wins.find((w) => w.start > t) || wins[2]).start };
+  }
+  const start = from ? parseISODate(from) : null;
+  const end = to ? parseISODate(to) : null;
+  if (start && t < start) return { active: false, nextStart: start };
+  if (end && t > end) return { active: false, ended: true };
+  return { active: true, start, end };
+}
+
 function checkStatus(c, today) {
+  const si = seasonInfo(c, today);
+  if (!si.active) return { state: 'off', due: null, daysLeft: 9999, never: false, nextStart: si.nextStart || null, ended: !!si.ended };
   const due = checkNextDue(c);
   if (!due) return { state: 'due', due: null, daysLeft: 0, never: true };
+  // ultimo controllo fatto prima dell'inizio di questo periodo: si riparte da capo, non è "in ritardo"
+  if (si.start && startOfDay(new Date(c.lastDoneAt)) < si.start) return { state: 'due', due: null, daysLeft: 0, never: false, fresh: true };
   const daysLeft = diffDays(due, today);
+  // la prossima scadenza cade dopo la fine del periodo: per questo periodo il controllo è completato
+  if (si.end && due > si.end) return { state: 'ok', due, daysLeft, never: false, finalDone: true };
   const warn = (FREQ[c.frequency] && FREQ[c.frequency].warn) || 0;
   let state = 'ok';
   if (daysLeft < 0) state = 'overdue';
@@ -302,7 +334,6 @@ function checkStatus(c, today) {
   else if (daysLeft <= warn) state = 'soon';
   return { state, due, daysLeft, never: false };
 }
-
 // ============================================================
 //  SCADENZE (corsi, visite, contratti...)
 // ============================================================
@@ -497,6 +528,7 @@ function PrintSheet({ landscape = true, children }) {
           .print-sheet td.l, .print-sheet th.l { text-align: left; }
           .print-sheet .we { background: #f3f4f6; }
           .print-sheet .ot { font-weight: bold; }
+          .print-sheet .hl { background: #fde047 !important; font-weight: bold; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         }
       `}</style>
       {children}
@@ -746,6 +778,7 @@ function InkCanvas({ strokes, h, onChange, disabled = false }) {
     </div>
   );
 }
+
 // ============================================================
 //  LISTA SPESA  (stessa logica di prima + tab COLAZIONE)
 // ============================================================
@@ -1205,7 +1238,6 @@ function MeetingPage({ items, role, onBack }) {
     </PageShell>
   );
 }
-
 // ============================================================
 //  LAVORI E MANUTENZIONI
 // ============================================================
@@ -1399,17 +1431,23 @@ function CheckModal({ initial, onClose }) {
   const [frequency, setFrequency] = useState(initial ? initial.frequency : 'daily');
   const [everyDays, setEveryDays] = useState(initial && initial.everyDays ? String(initial.everyDays) : '15');
   const [lastDate, setLastDate] = useState(initial && initial.lastDoneAt ? toISODate(new Date(initial.lastDoneAt)) : '');
+  const [activeFrom, setActiveFrom] = useState(initial ? initial.activeFrom || '' : '');
+  const [activeTo, setActiveTo] = useState(initial ? initial.activeTo || '' : '');
+  const [yearly, setYearly] = useState(initial ? !!initial.seasonYearly : false);
   const [busy, setBusy] = useState(false);
   const origLast = initial && initial.lastDoneAt ? toISODate(new Date(initial.lastDoneAt)) : '';
 
   const submit = async (e) => {
     e.preventDefault();
     if (!title.trim()) return;
+    if (activeFrom && activeTo && activeTo < activeFrom && !yearly) { alert('La data «Fino al» è prima di «Dal».'); return; }
     setBusy(true);
     try {
       const data = {
         title: title.trim(), area: area.trim(), notes: notes.trim(), frequency,
-        everyDays: frequency === 'custom' ? Math.max(1, parseInt(everyDays, 10) || 1) : null
+        everyDays: frequency === 'custom' ? Math.max(1, parseInt(everyDays, 10) || 1) : null,
+        activeFrom: activeFrom || null, activeTo: activeTo || null,
+        seasonYearly: !!(yearly && activeFrom && activeTo)
       };
       if (lastDate !== origLast) {
         // data scelta a mano -> mezzogiorno locale, così non cambia giorno con il fuso orario
@@ -1445,6 +1483,18 @@ function CheckModal({ initial, onClose }) {
               <span className="font-black text-slate-500 text-sm uppercase">giorni</span>
             </div>
           )}
+        </div>
+        <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
+          <label className={LABEL}>Solo per un periodo (facoltativo)</label>
+          <div className="grid grid-cols-2 gap-3">
+            <div><span className="text-[10px] font-black uppercase text-slate-400 px-2">Dal</span><input type="date" value={activeFrom} onChange={(e) => setActiveFrom(e.target.value)} className={INPUT} /></div>
+            <div><span className="text-[10px] font-black uppercase text-slate-400 px-2">Fino al</span><input type="date" value={activeTo} onChange={(e) => setActiveTo(e.target.value)} className={INPUT} /></div>
+          </div>
+          <label className="flex items-center gap-3 font-bold text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" checked={yearly} onChange={(e) => setYearly(e.target.checked)} className="w-6 h-6" /> Ripeti ogni anno (servono entrambe le date)
+          </label>
+          <p className="text-[11px] font-bold text-slate-400">Fuori dal periodo il controllo non compare tra gli allarmi. Lascia vuoto per averlo sempre.</p>
+          {(activeFrom || activeTo) && <button type="button" onClick={() => { setActiveFrom(''); setActiveTo(''); setYearly(false); }} className="text-[11px] font-black uppercase text-red-600">Togli il periodo</button>}
         </div>
         <div>
           <label className={LABEL}>Dove / reparto (facoltativo)</label>
@@ -1516,7 +1566,7 @@ function CheckHistoryModal({ check, isManager, onClose }) {
 }
 
 function ChecklistPage({ checks, role, isManager, today, onBack }) {
-  const [filter, setFilter] = useState('due');
+  const [filter, setFilter] = useState('alerts');
   const [editing, setEditing] = useState(null);
   const [historyFor, setHistoryFor] = useState(null);
   const [armed, setArmed] = useState(null); // conferma in due tocchi, per evitare spunte per sbaglio
@@ -1528,15 +1578,20 @@ function ChecklistPage({ checks, role, isManager, today, onBack }) {
   }, [armed]);
 
   const enriched = useMemo(() => {
-    const order = { overdue: 0, due: 1, soon: 2, ok: 3 };
+    const order = { overdue: 0, due: 1, soon: 2, ok: 3, off: 4 };
     return checks
       .map((c) => ({ ...c, st: checkStatus(c, today) }))
       .sort((a, b) => order[a.st.state] - order[b.st.state] || a.st.daysLeft - b.st.daysLeft || (a.title || '').localeCompare(b.title || ''));
   }, [checks, today]);
 
-  const dueCount = enriched.filter((c) => c.st.state === 'due' || c.st.state === 'overdue').length;
+  const nOverdue = enriched.filter((c) => c.st.state === 'overdue').length;
+  const nToday = enriched.filter((c) => c.st.state === 'due').length;
+  const nSoon = enriched.filter((c) => c.st.state === 'soon').length;
+  const nOff = enriched.filter((c) => c.st.state === 'off').length;
+  const alertCount = nOverdue + nToday + nSoon;
   const list = enriched.filter((c) => {
-    if (filter === 'due') return c.st.state === 'due' || c.st.state === 'overdue';
+    if (filter === 'alerts') return ['overdue', 'due', 'soon'].includes(c.st.state);
+    if (['overdue', 'due', 'soon', 'off'].includes(filter)) return c.st.state === filter;
     if (filter === 'all') return true;
     return c.frequency === filter;
   });
@@ -1567,11 +1622,23 @@ function ChecklistPage({ checks, role, isManager, today, onBack }) {
     overdue: { bar: 'border-red-600', tag: 'bg-red-600 text-white' },
     due: { bar: 'border-orange-500', tag: 'bg-orange-500 text-white' },
     soon: { bar: 'border-yellow-400', tag: 'bg-yellow-100 text-yellow-800' },
-    ok: { bar: 'border-white', tag: 'bg-green-100 text-green-800' }
+    ok: { bar: 'border-white', tag: 'bg-green-100 text-green-800' },
+    off: { bar: 'border-slate-200', tag: 'bg-slate-200 text-slate-600' }
+  };
+
+  const fmtPeriod = (c) => {
+    if (!c.activeFrom && !c.activeTo) return null;
+    const f = c.activeFrom ? parseISODate(c.activeFrom) : null;
+    const t = c.activeTo ? parseISODate(c.activeTo) : null;
+    const dm = (d) => (c.seasonYearly ? fmtDayMonth(d) : fmtDateIT(d));
+    return `${f ? `dal ${dm(f)} ` : ''}${t ? `al ${dm(t)}` : ''}${c.seasonYearly ? ' · ogni anno' : ''}`.trim();
   };
 
   const label = (c) => {
     const s = c.st;
+    if (s.state === 'off') return s.nextStart ? `Fuori periodo · riprende il ${fmtDateIT(s.nextStart)}` : 'Periodo concluso';
+    if (s.fresh) return 'Da fare: inizio periodo';
+    if (s.finalDone) return 'Periodo completato';
     if (s.never) return 'Mai eseguito';
     if (s.state === 'overdue') return `In ritardo di ${-s.daysLeft} ${-s.daysLeft === 1 ? 'giorno' : 'giorni'}`;
     if (s.state === 'due') return 'Da fare oggi';
@@ -1580,17 +1647,32 @@ function ChecklistPage({ checks, role, isManager, today, onBack }) {
 
   return (
     <PageShell title="Check-list" subtitle="Controlli periodici" onBack={onBack}>
+      {checks.length > 0 && (
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { id: 'overdue', n: nOverdue, text: 'In ritardo', on: 'bg-red-600 text-white', off: 'bg-red-50 text-red-700 border-red-100' },
+            { id: 'due', n: nToday, text: 'Da fare oggi', on: 'bg-orange-500 text-white', off: 'bg-orange-50 text-orange-700 border-orange-100' },
+            { id: 'soon', n: nSoon, text: 'In scadenza', on: 'bg-yellow-400 text-black', off: 'bg-yellow-50 text-yellow-800 border-yellow-100' }
+          ].map((t) => (
+            <button key={t.id} onClick={() => setFilter(filter === t.id ? 'alerts' : t.id)} className={`rounded-3xl p-4 text-left border-2 shadow-md active:scale-95 transition-all ${t.n > 0 ? t.on + ' border-transparent' : 'bg-white text-slate-300 border-slate-100'}`}>
+              <p className="text-4xl font-black leading-none">{t.n}</p>
+              <p className="text-[10px] font-black uppercase tracking-widest mt-2 opacity-90">{t.text}</p>
+            </button>
+          ))}
+        </div>
+      )}
       <div className="flex gap-2 overflow-x-auto no-scrollbar">
-        <Chip active={filter === 'due'} onClick={() => setFilter('due')} color="bg-orange-600">Da fare ({dueCount})</Chip>
+        <Chip active={filter === 'alerts'} onClick={() => setFilter('alerts')} color="bg-orange-600">Allarmi ({alertCount})</Chip>
         <Chip active={filter === 'all'} onClick={() => setFilter('all')}>Tutti ({checks.length})</Chip>
         {Object.entries(FREQ).filter(([id]) => id !== 'custom').map(([id, f]) => (
           <Chip key={id} active={filter === id} onClick={() => setFilter(id)} color="bg-emerald-600">{f.label}</Chip>
         ))}
         <Chip active={filter === 'custom'} onClick={() => setFilter('custom')} color="bg-emerald-600">Ogni N gg</Chip>
+        {nOff > 0 && <Chip active={filter === 'off'} onClick={() => setFilter('off')} color="bg-slate-600">Fuori periodo ({nOff})</Chip>}
       </div>
 
       {list.length === 0 ? (
-        <Empty>{filter === 'due' ? (checks.length ? 'Tutto fatto! 🎉' : 'Nessun controllo inserito') : 'Nessun controllo'}</Empty>
+        <Empty>{filter === 'alerts' ? (checks.length ? 'Tutto in regola! 🎉' : 'Nessun controllo inserito') : 'Nessun controllo'}</Empty>
       ) : (
         <div className="stagger space-y-4">
           {list.map((c) => {
@@ -1606,6 +1688,7 @@ function ChecklistPage({ checks, role, isManager, today, onBack }) {
                         {c.frequency === 'custom' ? `Ogni ${c.everyDays} gg` : FREQ[c.frequency] ? FREQ[c.frequency].label : c.frequency}
                       </span>
                       {c.area && <span className="text-[10px] font-black uppercase text-slate-400">📍 {c.area}</span>}
+                      {fmtPeriod(c) && <span className="bg-sky-100 text-sky-800 px-3 py-1 rounded-lg text-[10px] font-black uppercase">📅 {fmtPeriod(c)}</span>}
                     </div>
                     <h3 className="text-xl font-black leading-tight text-slate-900">{c.title}</h3>
                     {c.notes && <p className="text-sm font-medium text-slate-500 whitespace-pre-wrap">{c.notes}</p>}
@@ -1615,7 +1698,9 @@ function ChecklistPage({ checks, role, isManager, today, onBack }) {
                     </div>
                   </div>
                   <div className="sm:w-52 flex-shrink-0">
-                    {doneToday ? (
+                    {c.st.state === 'off' ? (
+                      <div className="w-full bg-slate-100 text-slate-400 py-4 rounded-2xl font-black text-center text-sm uppercase">Fuori periodo</div>
+                    ) : doneToday ? (
                       <div className="anim-pop w-full bg-green-100 text-green-700 py-4 rounded-2xl font-black text-center flex items-center justify-center gap-2"><Icon name="check-circle" size={20} /> FATTO</div>
                     ) : (
                       <button
@@ -1644,6 +1729,7 @@ function ChecklistPage({ checks, role, isManager, today, onBack }) {
     </PageShell>
   );
 }
+
 // ============================================================
 //  DIPENDENTI  (anagrafica pubblica + dati riservati agli admin)
 //  employees/{id}         -> nome, ruolo, tipo, orario standard (visibile allo staff, serve ai turni)
@@ -2187,7 +2273,9 @@ function ShiftsPage({ isManager, today, onBack }) {
       </PrintSheet>
     </PageShell>
   );
-}// ============================================================
+}
+
+// ============================================================
 //  ECONOMIA  (solo admin e superadmin)
 //  - Scadenze con promemoria
 //  - Dipendenti
@@ -2331,9 +2419,8 @@ function DeadlinesTab({ deadlines, employees, today }) {
     </div>
   );
 }
-
 // ---------- LUL ----------
-function LulCell({ value, tone, allowRest, label, onCommit }) {
+function LulCell({ value, tone, allowRest, allowMark, marked, label, onCommit, onMark }) {
   const show = (v) => (v === undefined || v === null ? '' : String(normCode(v)).replace('.', ','));
   const [text, setText] = useState(show(value));
   const [isFocus, setIsFocus] = useState(false);
@@ -2366,6 +2453,8 @@ function LulCell({ value, tone, allowRest, label, onCommit }) {
   const showCell = (el) => { try { el.scrollIntoView({ block: 'nearest', inline: 'center' }); } catch { /* ignore */ } };
   const onKey = (e) => {
     if (e.key === 'Enter') { e.currentTarget.blur(); return; }
+    // evidenzia / togli l'evidenziazione del giorno (solo a chiamata): tasto * oppure H
+    if (allowMark && (e.key === '*' || e.key === 'h' || e.key === 'H') && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); onMark(!marked); return; }
     if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey) { requestAnimationFrame(() => { const a = document.activeElement; if (a && a.dataset && a.dataset.lul) showCell(a); }); return; }
     if (e.key === 'Tab' && e.shiftKey) { requestAnimationFrame(() => { const a = document.activeElement; if (a && a.dataset && a.dataset.lul) showCell(a); }); return; }
     if (!['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
@@ -2404,6 +2493,9 @@ function LulCell({ value, tone, allowRest, label, onCommit }) {
           {codes.map((c) => (
             <button key={c} type="button" tabIndex={-1} onClick={() => quick(c)} className="min-w-[3rem] px-3 py-2 rounded-xl bg-sky-500 text-white font-black text-sm active:scale-95">{c}</button>
           ))}
+          {allowMark && (
+            <button type="button" tabIndex={-1} onClick={() => onMark(!marked)} className="px-3 py-2 rounded-xl bg-yellow-400 text-black font-black text-xs uppercase active:scale-95">{marked ? '★ Togli' : '★ Evidenzia'}</button>
+          )}
           <button type="button" tabIndex={-1} onClick={() => quick(null)} className="px-3 py-2 rounded-xl bg-white/15 text-white font-black text-xs uppercase active:scale-95">Svuota</button>
         </div>
       )}
@@ -2454,14 +2546,17 @@ function LulTab({ employees, priv, today }) {
   const monthLabel = `${MONTHS[month]} ${year}`;
   const dim = new Date(year, month + 1, 0).getDate();
   const [entries, setEntries] = useState({});
+  const [marks, setMarks] = useState({}); // giorni evidenziati: { idDipendente: { giorno: true } }
   const [err, setErr] = useState('');
   const [showClose, setShowClose] = useState(false);
+  const [printMarks, setPrintMarks] = useState(false); // di default le caselle evidenziate NON escono in stampa
 
   useEffect(() => {
     setEntries({});
+    setMarks({});
     const unsub = onSnapshot(
       doc(db, 'lul', monthKey),
-      (s) => setEntries(s.exists() ? s.data().entries || {} : {}),
+      (s) => { const d = s.exists() ? s.data() : {}; setEntries(d.entries || {}); setMarks(d.marks || {}); },
       (e) => setErr(e.message)
     );
     return () => unsub();
@@ -2472,7 +2567,10 @@ function LulTab({ employees, priv, today }) {
     return list.sort(empSort).map((e) => ({ emp: e, calc: computeLul(e, priv[e.id], entries[e.id], year, month, today) }));
   }, [employees, priv, entries, year, month, today]);
 
-  const hasData = Object.keys(entries).some((id) => entries[id] && Object.keys(entries[id]).length);
+  const hasData = Object.keys(entries).some((id) => entries[id] && Object.keys(entries[id]).length)
+    || Object.keys(marks).some((id) => marks[id] && Object.keys(marks[id]).length);
+  const isMarked = (empId, day) => !!(marks[empId] && marks[empId][String(day)]);
+  const hasMarks = Object.keys(marks).some((id) => marks[id] && Object.values(marks[id]).some(Boolean));
 
   const commit = async (empId, day, value) => {
     try {
@@ -2483,7 +2581,17 @@ function LulTab({ employees, priv, today }) {
     } catch (e) { alert('Errore salvataggio: ' + e.message); }
   };
 
-  const tone = (calc, day) => {
+  const commitMark = async (empId, day, on) => {
+    try {
+      await setDoc(doc(db, 'lul', monthKey), {
+        marks: { [empId]: { [String(day)]: on ? true : deleteField() } },
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    } catch (e) { alert('Errore salvataggio: ' + e.message); }
+  };
+
+  const tone = (calc, day, marked) => {
+    if (marked) return 'bg-yellow-300 border-yellow-500 text-black ring-2 ring-yellow-400';
     const we = day.dow >= 5;
     if (day.isAbs) return 'bg-sky-100 border-sky-300 text-sky-800';
     if (!day.filled) return we ? 'bg-slate-100 border-slate-200' : 'bg-white border-slate-200';
@@ -2510,6 +2618,11 @@ function LulTab({ employees, priv, today }) {
 
       <div className="flex flex-wrap gap-2">
         <button onClick={doPrint} className={BTN_SOFT}><Icon name="printer" size={14} /> Esporta PDF</button>
+        {hasMarks && (
+          <label className="flex items-center gap-2 px-4 py-3 rounded-2xl border-2 border-yellow-300 bg-yellow-50 font-black text-xs uppercase tracking-wide text-slate-700 cursor-pointer select-none">
+            <input type="checkbox" checked={printMarks} onChange={(e) => setPrintMarks(e.target.checked)} className="w-5 h-5" /> Evidenziati anche in stampa
+          </label>
+        )}
         <button onClick={() => setShowClose(true)} className="px-4 py-3 rounded-2xl font-black text-xs uppercase tracking-wide bg-red-600 text-white active:scale-95 flex items-center gap-2"><Icon name="refresh" size={14} /> Chiudi mese / Reset</button>
       </div>
 
@@ -2523,6 +2636,7 @@ function LulTab({ employees, priv, today }) {
             <span className="px-3 py-1 rounded-lg bg-yellow-100 text-yellow-900 border border-yellow-300">▼ meno del previsto</span>
             <span className="px-3 py-1 rounded-lg bg-sky-100 text-sky-800 border border-sky-300">FE ferie · M malattia · P permesso · R riposo (solo fissi)</span>
             <span className="px-3 py-1 rounded-lg bg-indigo-50 text-indigo-900 border border-indigo-200">a chiamata</span>
+            <span className="px-3 py-1 rounded-lg bg-yellow-300 text-black border border-yellow-500">★ giorno evidenziato (a chiamata): tasto * o H</span>
           </div>
 
           <div className="overflow-x-auto bg-white rounded-3xl shadow-xl border-4 border-white">
@@ -2546,7 +2660,16 @@ function LulTab({ employees, priv, today }) {
                     </td>
                     {calc.days.map((day) => (
                       <td key={day.d} className="p-0.5">
-                        <LulCell value={day.v} tone={tone(calc, day)} allowRest={!calc.isCall} label={`${empName(emp)} · ${day.d} ${MONTHS[month]}`} onCommit={(v) => commit(emp.id, day.d, v)} />
+                        <LulCell
+                          value={day.v}
+                          tone={tone(calc, day, isMarked(emp.id, day.d))}
+                          allowRest={!calc.isCall}
+                          allowMark={calc.isCall}
+                          marked={isMarked(emp.id, day.d)}
+                          label={`${empName(emp)} · ${day.d} ${MONTHS[month]}`}
+                          onCommit={(v) => commit(emp.id, day.d, v)}
+                          onMark={(on) => commitMark(emp.id, day.d, on)}
+                        />
                       </td>
                     ))}
                     <td className="p-2 text-center font-black text-slate-900">{fmtNum(calc.totals.worked)}</td>
@@ -2616,7 +2739,7 @@ function LulTab({ employees, priv, today }) {
             {rows.map(({ emp, calc }) => (
               <tr key={emp.id}>
                 <td className="l"><b>{empName(emp)}</b></td>
-                {calc.days.map((day) => <td key={day.d} className={day.dow >= 5 ? 'we' : ''}>{day.v === undefined ? '' : String(day.v).replace('.', ',')}</td>)}
+                {calc.days.map((day) => <td key={day.d} className={`${day.dow >= 5 ? 'we' : ''}${printMarks && isMarked(emp.id, day.d) ? ' hl' : ''}`.trim()}>{day.v === undefined ? '' : String(day.v).replace('.', ',')}</td>)}
                 <td><b>{fmtNum(calc.totals.worked)}</b></td>
                 <td><b>{calc.totals.daysWorked}</b></td>
               </tr>
