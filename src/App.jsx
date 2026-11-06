@@ -2725,7 +2725,7 @@ function LulTab({ employees, priv, today }) {
       {showClose && <CloseMonthModal monthLabel={monthLabel} monthKey={monthKey} hasData={hasData} onClose={() => setShowClose(false)} />}
 
       <PrintSheet landscape>
-        <h1>LUL — {monthLabel}</h1>
+        <h1>{monthLabel}</h1>
         <table>
           <thead>
             <tr>
